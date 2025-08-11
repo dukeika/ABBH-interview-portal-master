@@ -1,279 +1,280 @@
-import React, { useEffect, useState } from "react";
+// client/src/pages/ApplyNow.tsx
+import { useEffect, useMemo, useState } from "react";
 import {
-  listJobs,
-  register as apiRegister,
-  setToken,
-  submitApplication,
-} from "../services/api";
-import { useNavigate, Link } from "react-router-dom";
+  Box,
+  Stack,
+  Paper,
+  Typography,
+  TextField,
+  Button,
+  Select,
+  MenuItem,
+  InputLabel,
+  FormControl,
+  Alert,
+  Snackbar,
+  CircularProgress,
+} from "@mui/material";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { api, API_BASE } from "../lib/api";
 
 type Job = {
-  id: string | number;
+  id: string;
   title: string;
+  status: "DRAFT" | "PUBLISHED" | "CLOSED";
   location?: string | null;
 };
 
-type SubmitState = "idle" | "submitting";
+const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
 export default function ApplyNow() {
   const navigate = useNavigate();
+  const { jobId: jobIdFromParams } = useParams<{ jobId: string }>();
+  const [search] = useSearchParams();
+  const jobIdFromQuery = search.get("jobId") || undefined;
+  const initialJobId = jobIdFromParams || jobIdFromQuery;
 
-  // account
+  // form state
+  const [jobId, setJobId] = useState(initialJobId || "");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
-
-  // application
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [jobId, setJobId] = useState<string>("");
+  const [resumeUrl, setResumeUrl] = useState("");
   const [coverLetter, setCoverLetter] = useState("");
-  const [resume, setResume] = useState<File | null>(null);
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
 
-  // ui
-  const [err, setErr] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
-  const [state, setState] = useState<SubmitState>("idle");
+  // ui state
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successOpen, setSuccessOpen] = useState(false);
+
+  const mustChooseJob = useMemo(() => !initialJobId, [initialJobId]);
 
   useEffect(() => {
     (async () => {
       try {
-        const data = await listJobs();
-        const arr: Job[] = Array.isArray(data) ? data : [];
-        setJobs(arr);
-        if (arr.length > 0) setJobId(String(arr[0].id));
-      } catch (e: unknown) {
-        setErr(extractErr(e, "Failed to load jobs"));
+        setLoading(true);
+        if (mustChooseJob) {
+          const data = await api<Job[]>("/api/jobs?status=PUBLISHED");
+          setJobs(data);
+        }
+      } catch (e: any) {
+        console.error(e);
+      } finally {
+        setLoading(false);
       }
     })();
-  }, []);
-
-  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0] ?? null;
-    setResume(f);
-  }
+  }, [mustChooseJob]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setErr(null);
-    setOk(null);
+    setError(null);
 
-    if (!resume) {
-      setErr("Please attach your resume (PDF or DOC).");
-      return;
-    }
-    if (!jobId) {
-      setErr("Please select a job.");
-      return;
-    }
+    // validations
+    if (!jobId) return setError("Please select a job.");
+    if (!fullName.trim()) return setError("Full name is required.");
+    if (!email.trim() || !isEmail(email))
+      return setError("Enter a valid email.");
+    if (!password || password.length < 6)
+      return setError("Password must be at least 6 characters.");
+    if (password !== confirm) return setError("Passwords do not match.");
 
-    setState("submitting");
+    setSubmitting(true);
     try {
-      // 1) create account + login
-      const auth = await apiRegister({ fullName, email, password, phone });
-      setToken(auth.token);
-
-      // 2) submit application (multipart)
-      await submitApplication({
-        jobId,
-        fullName,
-        phone,
-        coverLetter,
-        file: resume,
+      await api("/api/applications", {
+        method: "POST",
+        body: JSON.stringify({
+          jobId,
+          candidateName: fullName.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+          resumeUrl: resumeUrl.trim(),
+          coverLetter: coverLetter.trim(),
+          password, // <- required by backend to create Candidate account
+        }),
       });
 
-      setOk("Application submitted! Redirecting to your status…");
-      setTimeout(() => navigate("/status"), 900);
-    } catch (e: unknown) {
-      const msg = extractErr(e, "Failed to submit");
-      // Tip UX for 409 (email exists)
-      if (/409/.test(msg) || /exists/i.test(msg)) {
-        setErr(
-          "An account with this email already exists. Please log in instead on the Login page."
-        );
-        return;
-      }
-      setErr(msg);
+      setSuccessOpen(true);
+
+      // reset fields (keep job selection)
+      setFullName("");
+      setEmail("");
+      setPhone("");
+      setResumeUrl("");
+      setCoverLetter("");
+      setPassword("");
+      setConfirm("");
+
+      // Optional: route to candidate login so they can view status immediately
+      // setTimeout(() => navigate("/candidate/login"), 1200);
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message || "Failed to submit application.");
     } finally {
-      setState("idle");
+      setSubmitting(false);
     }
+  }
+
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          p: 4,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
   }
 
   return (
-    <div style={{ maxWidth: 720, margin: "32px auto", padding: 16 }}>
-      <h2 style={{ marginBottom: 8 }}>Apply now</h2>
-      <p style={{ color: "#666", marginTop: 0 }}>
-        Create your account, pick a role, upload your resume, and add a brief
-        cover letter.
-      </p>
+    <Stack sx={{ p: { xs: 2, md: 4 }, alignItems: "center" }}>
+      <Paper
+        variant="outlined"
+        sx={{
+          width: "100%",
+          maxWidth: 720,
+          p: { xs: 2, md: 3 },
+          borderRadius: 3,
+        }}
+      >
+        <Stack spacing={2}>
+          <Typography variant="h5" fontWeight={800}>
+            Apply for a Role
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Create your candidate account while applying so you can log in and
+            track your status.
+          </Typography>
 
-      {err && (
-        <div
-          style={{
-            background: "#fee",
-            color: "#b00",
-            padding: 12,
-            borderRadius: 8,
-            marginBottom: 12,
-          }}
-        >
-          {err}
-        </div>
-      )}
-      {ok && (
-        <div
-          style={{
-            background: "#e8f5e9",
-            color: "#1b5e20",
-            padding: 12,
-            borderRadius: 8,
-            marginBottom: 12,
-          }}
-        >
-          {ok}
-        </div>
-      )}
+          {error && <Alert severity="error">{error}</Alert>}
 
-      <form onSubmit={onSubmit}>
-        <fieldset style={fs()}>
-          <legend style={lg()}>Account</legend>
+          <Box component="form" noValidate onSubmit={onSubmit}>
+            <Stack spacing={2.2}>
+              {/* Job picker (only if no jobId in URL) */}
+              {mustChooseJob && (
+                <FormControl size="medium" fullWidth>
+                  <InputLabel id="job-label">Select Job</InputLabel>
+                  <Select
+                    labelId="job-label"
+                    label="Select Job"
+                    value={jobId}
+                    onChange={(e) => setJobId(String(e.target.value))}
+                  >
+                    {jobs.length === 0 ? (
+                      <MenuItem value="" disabled>
+                        No published jobs
+                      </MenuItem>
+                    ) : (
+                      jobs.map((j) => (
+                        <MenuItem key={j.id} value={j.id}>
+                          {j.title} {j.location ? `— ${j.location}` : ""}
+                        </MenuItem>
+                      ))
+                    )}
+                  </Select>
+                </FormControl>
+              )}
 
-          <label style={lbl()}>
-            Full name
-            <input
-              style={inp()}
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-            />
-          </label>
+              <TextField
+                label="Full Name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                required
+                fullWidth
+              />
 
-          <label style={lbl()}>
-            Email
-            <input
-              style={inp()}
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </label>
+              <TextField
+                type="email"
+                label="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                fullWidth
+              />
 
-          <label style={lbl()}>
-            Password
-            <input
-              style={inp()}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-            />
-          </label>
+              <TextField
+                label="Phone (optional)"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                fullWidth
+              />
 
-          <label style={lbl()}>
-            Phone (optional)
-            <input
-              style={inp()}
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-            />
-          </label>
-        </fieldset>
+              <TextField
+                label="Resume URL (optional)"
+                helperText="Paste a link to your resume (Google Drive, Dropbox, etc.)"
+                value={resumeUrl}
+                onChange={(e) => setResumeUrl(e.target.value)}
+                fullWidth
+              />
 
-        <fieldset style={fs()}>
-          <legend style={lg()}>Application</legend>
+              {/* Cover Letter */}
+              <TextField
+                label="Cover Letter (optional)"
+                placeholder="Write a brief note about why you're a good fit…"
+                value={coverLetter}
+                onChange={(e) => setCoverLetter(e.target.value)}
+                multiline
+                minRows={5}
+                fullWidth
+              />
 
-          <label style={lbl()}>
-            Job
-            <select
-              style={inp()}
-              value={jobId}
-              onChange={(e) => setJobId(e.target.value)}
-              required
-            >
-              {jobs.map((j) => (
-                <option key={String(j.id)} value={String(j.id)}>
-                  {j.title} {j.location ? `— ${j.location}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+              {/* Passwords */}
+              <TextField
+                type="password"
+                label="Create Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                fullWidth
+              />
+              <TextField
+                type="password"
+                label="Confirm Password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                required
+                fullWidth
+              />
 
-          <label style={lbl()}>
-            Cover letter (optional)
-            <textarea
-              style={inp()}
-              rows={6}
-              value={coverLetter}
-              onChange={(e) => setCoverLetter(e.target.value)}
-            />
-          </label>
+              <Stack
+                direction="row"
+                spacing={1.5}
+                justifyContent="flex-end"
+                alignItems="center"
+              >
+                <Button
+                  variant="text"
+                  onClick={() => navigate(-1)}
+                  disabled={submitting}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" variant="contained" disabled={submitting}>
+                  {submitting ? "Submitting…" : "Submit Application"}
+                </Button>
+              </Stack>
+            </Stack>
+          </Box>
 
-          <label style={lbl()}>
-            Resume (PDF/DOC)
-            <input
-              type="file"
-              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              onChange={onFileChange}
-              required
-              style={{ display: "block", marginTop: 8 }}
-            />
-          </label>
-        </fieldset>
+          <Typography variant="caption" color="text.secondary">
+            API: <code>POST {API_BASE}/api/applications</code>
+          </Typography>
+        </Stack>
+      </Paper>
 
-        <button type="submit" disabled={state === "submitting"} style={btn()}>
-          {state === "submitting" ? "Submitting…" : "Submit application"}
-        </button>
-
-        <p style={{ marginTop: 12 }}>
-          Already have an account? <Link to="/login">Log in</Link>
-        </p>
-      </form>
-    </div>
+      <Snackbar
+        open={successOpen}
+        autoHideDuration={2000}
+        onClose={() => setSuccessOpen(false)}
+        message="Application submitted! You can now log in to the Candidate Dashboard."
+      />
+    </Stack>
   );
-}
-
-/** minimal styles */
-function fs(): React.CSSProperties {
-  return {
-    border: "1px solid #eee",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-  };
-}
-function lg(): React.CSSProperties {
-  return { padding: "0 6px", fontWeight: 600 };
-}
-function lbl(): React.CSSProperties {
-  return { display: "block", marginBottom: 12 };
-}
-function inp(): React.CSSProperties {
-  return {
-    width: "100%",
-    padding: 10,
-    marginTop: 6,
-    border: "1px solid #ddd",
-    borderRadius: 8,
-  };
-}
-function btn(): React.CSSProperties {
-  return {
-    width: "100%",
-    padding: 12,
-    borderRadius: 10,
-    border: "none",
-    background: "#222",
-    color: "#fff",
-    cursor: "pointer",
-  };
-}
-
-function extractErr(e: unknown, fallback: string): string {
-  if (typeof e === "object" && e && "response" in e) {
-    const res = (e as any).response;
-    return res?.data?.error || res?.statusText || fallback;
-  }
-  return (e as Error)?.message || fallback;
 }

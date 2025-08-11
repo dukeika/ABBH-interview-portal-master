@@ -1,10 +1,12 @@
 import { Router } from "express";
 import jwt from "jsonwebtoken";
+import { prisma } from "../db/prisma.js";
+import { verifyPassword } from "../lib/auth.js";
 
 const r = Router();
 
-// TEMP in-memory users — replace with Prisma later
-const USERS = [
+// TEMP in-memory admin users
+const ADMINS = [
   {
     id: "u-hr-1",
     email: "hr@example.com",
@@ -12,7 +14,6 @@ const USERS = [
     role: "HR",
     password: "admin123",
   },
-  // user typo safety:
   {
     id: "u-hr-2",
     email: "hr@examplle.com",
@@ -22,31 +23,74 @@ const USERS = [
   },
 ];
 
-function signToken(payload) {
+function sign(payload) {
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "7d" });
 }
 
-r.post("/login", (req, res) => {
-  const { email, password } = req.body || {};
+r.post("/login", async (req, res) => {
+  const { email, password, type } = req.body || {};
   if (!email || !password)
     return res.status(400).json({ error: "email and password are required" });
 
-  const user = USERS.find(
-    (u) => u.email.toLowerCase() === String(email).toLowerCase()
-  );
-  if (!user || user.password !== password) {
-    return res.status(401).json({ error: "Invalid credentials" });
+  // 1) If explicitly admin
+  if (type === "ADMIN") {
+    const admin = ADMINS.find(
+      (a) => a.email.toLowerCase() === String(email).toLowerCase()
+    );
+    if (!admin || admin.password !== password)
+      return res.status(401).json({ error: "Invalid credentials" });
+    const token = sign({
+      sub: admin.id,
+      role: "HR",
+      email: admin.email,
+      name: admin.name,
+    });
+    return res.json({
+      token,
+      user: { id: admin.id, email: admin.email, name: admin.name, role: "HR" },
+    });
   }
 
-  const token = signToken({
-    sub: user.id,
-    role: user.role,
-    email: user.email,
-    name: user.name,
+  // 2) Try admin first (backward compatible)
+  const admin = ADMINS.find(
+    (a) => a.email.toLowerCase() === String(email).toLowerCase()
+  );
+  if (admin && admin.password === password) {
+    const token = sign({
+      sub: admin.id,
+      role: "HR",
+      email: admin.email,
+      name: admin.name,
+    });
+    return res.json({
+      token,
+      user: { id: admin.id, email: admin.email, name: admin.name, role: "HR" },
+    });
+  }
+
+  // 3) Fallback to candidate login
+  const candidate = await prisma.candidate.findUnique({
+    where: { email: String(email).toLowerCase() },
+  });
+  if (!candidate) return res.status(401).json({ error: "Invalid credentials" });
+
+  const ok = await verifyPassword(password, candidate.passwordHash);
+  if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+
+  const token = sign({
+    sub: candidate.id,
+    role: "CANDIDATE",
+    email: candidate.email,
+    name: candidate.name,
   });
   res.json({
     token,
-    user: { id: user.id, email: user.email, name: user.name, role: user.role },
+    user: {
+      id: candidate.id,
+      role: "CANDIDATE",
+      email: candidate.email,
+      name: candidate.name,
+    },
   });
 });
 

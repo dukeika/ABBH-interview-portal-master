@@ -1,3 +1,4 @@
+// client/src/pages/admin/AdminDashboard.tsx
 import { useEffect, useMemo, useState } from "react";
 import {
   Box,
@@ -24,7 +25,6 @@ import PendingActionsIcon from "@mui/icons-material/PendingActions";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 
-// ---------------- Types ----------------
 type Job = {
   id: string;
   title: string;
@@ -66,9 +66,9 @@ const stageColor: Record<
   REJECTED: "error",
 };
 
-// ---------------- Component ----------------
 export default function AdminDashboard() {
   const navigate = useNavigate();
+
   const [jobs, setJobs] = useState<Job[]>([]);
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,12 +83,14 @@ export default function AdminDashboard() {
     try {
       setLoading(true);
       setError(null);
+
       const [jobsData, appsData] = await Promise.all([
         api<Job[]>("/api/jobs"),
-        api<Application[]>("/api/applications"),
+        api<any>("/api/applications"), // may be array OR {items,total,take,skip}
       ]);
+
       setJobs(jobsData);
-      setApps(appsData);
+      setApps(Array.isArray(appsData) ? appsData : appsData.items ?? []);
     } catch (e: any) {
       setError(e?.message || "Failed to load dashboard data");
     } finally {
@@ -100,7 +102,6 @@ export default function AdminDashboard() {
     fetchAll();
   }, []);
 
-  // computed
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return apps.filter((a) => {
@@ -108,7 +109,7 @@ export default function AdminDashboard() {
         !needle ||
         a.candidateName.toLowerCase().includes(needle) ||
         a.email.toLowerCase().includes(needle) ||
-        a.job?.title?.toLowerCase().includes(needle);
+        (a.job?.title || "").toLowerCase().includes(needle);
 
       const matchesStage = !stage || a.stage === stage;
       const matchesJob = !jobId || a.job?.id === jobId;
@@ -126,29 +127,19 @@ export default function AdminDashboard() {
       return acc;
     }, {});
 
-    // recent 7 days
-    const now = Date.now();
-    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const last7 = apps.filter(
       (a) => new Date(a.createdAt).getTime() >= weekAgo
     ).length;
 
-    // Top 5 recent
     const recent = [...filtered]
       .sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       )
-      .slice(0, 8);
+      .slice(0, 12);
 
-    return {
-      totalJobs,
-      publishedJobs,
-      totalApps,
-      byStage,
-      last7,
-      recent,
-    };
+    return { totalJobs, publishedJobs, totalApps, byStage, last7, recent };
   }, [jobs, apps, filtered]);
 
   return (
@@ -175,7 +166,7 @@ export default function AdminDashboard() {
               try {
                 navigate("/admin/applications");
               } catch {
-                /* If route not present, no-op */
+                /* ignore if route not present */
               }
             }}
           >
@@ -308,9 +299,10 @@ export default function AdminDashboard() {
             No applications match your filters.
           </Box>
         ) : (
-          filtered.slice(0, 12).map((a) => (
+          filtered.map((a) => (
             <Box
               key={a.id}
+              onClick={() => navigate(`/admin/applications/${a.id}`)}
               sx={{
                 display: "grid",
                 gridTemplateColumns: "1.6fr 1.6fr 1.4fr 1fr 0.8fr",
@@ -318,6 +310,8 @@ export default function AdminDashboard() {
                 borderTop: 1,
                 borderColor: "divider",
                 p: 1.5,
+                cursor: "pointer",
+                "&:hover": { bgcolor: "action.hover" },
               }}
             >
               <Cell primary={a.candidateName} secondary={a.phone || "—"} />
@@ -341,7 +335,6 @@ export default function AdminDashboard() {
           ))
         )}
 
-        {/* Footer with quick link */}
         <Divider />
         <Box
           sx={{
@@ -367,7 +360,8 @@ export default function AdminDashboard() {
   );
 }
 
-// ---------------- Little UI pieces ----------------
+/* ---------------- Small UI helpers ---------------- */
+
 function SummaryCard({
   icon,
   title,

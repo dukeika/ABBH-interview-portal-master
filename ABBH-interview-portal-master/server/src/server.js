@@ -9,6 +9,8 @@ import authRoutes from "./routes/auth.routes.js";
 import jobsRoutes from "./routes/jobs.routes.js";
 import appsRoutes from "./routes/applications.routes.js";
 import devRoutes from "./routes/dev.routes.js"; // dev-only helpers
+import candidateRoutes from "./routes/candidate.routes.js";
+import applicationStatusRoutes from "./routes/application-status.routes.js";
 
 // 1) Init app FIRST
 const app = express();
@@ -38,6 +40,8 @@ app.get("/api/health", (_req, res) => {
 app.use("/auth", authRoutes); // e.g., POST /auth/login
 app.use("/api/jobs", jobsRoutes); // e.g., GET /api/jobs
 app.use("/api/applications", appsRoutes);
+app.use("/candidate", candidateRoutes);
+app.use("/api/application-status", applicationStatusRoutes);
 
 // 5) Dev utilities (only outside production)
 if (process.env.NODE_ENV !== "production") {

@@ -21,13 +21,24 @@ model Job {
   applications Application[]
 }
 
+model Candidate {
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
+  passwordHash  String
+  createdAt     DateTime @default(now())
+  applications  Application[]
+}
+
 model Application {
   id            String     @id @default(cuid())
   jobId         String
+  candidateId   String?    // new (nullable for old rows)
   candidateName String
   email         String
   phone         String?
   resumeUrl     String?
+  coverLetter   String?
   stage         Stage       @default(APPLIED)
   status        AppStatus   @default(ACTIVE)
   overallScore  Float?
@@ -35,8 +46,11 @@ model Application {
   updatedAt     DateTime    @updatedAt
 
   job           Job         @relation(fields: [jobId], references: [id])
+  candidate     Candidate?  @relation(fields: [candidateId], references: [id])
   interviews    Interview[]
 }
+
+
 
 model Interview {
   id            String         @id @default(cuid())

@@ -13,6 +13,8 @@ import ManageRoles from "./pages/admin/ManageRoles";
 import { useAuth } from "./context/AuthContext";
 import { Container } from "@mui/material";
 import ApplyNow from "./pages/ApplyNow";
+import CandidateLogin from "./pages/candidate/CandidateLogin";
+import CandidateDashboard from "./pages/candidate/CandidateDashboard";
 
 function HomeRedirect() {
   const { user } = useAuth();
@@ -83,6 +85,10 @@ export default function App() {
 
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/apply-now" element={<ApplyNow />} />
+          <Route path="/apply" element={<ApplyNow />} />
+          <Route path="/apply/:jobId" element={<ApplyNow />} />
+          <Route path="/candidate/login" element={<CandidateLogin />} />
+          <Route path="/candidate/dashboard" element={<CandidateDashboard />} />
 
           <Route
             path="/admin/applications/:id"

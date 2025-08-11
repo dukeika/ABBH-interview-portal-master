@@ -9,10 +9,26 @@ import {
   Menu,
   MenuItem,
   Divider,
+  Tooltip,
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
+import DarkModeIcon from "@mui/icons-material/DarkMode";
+import LightModeIcon from "@mui/icons-material/LightMode";
+import { useTheme } from "@mui/material/styles";
+import logo from "../../assets/logo.png"; // adjust path as needed
+
+function ThemeToggle() {
+  const theme = useTheme();
+  return (
+    <Tooltip title="Toggle theme">
+      <IconButton onClick={() => (window as any).toggleTheme()}>
+        {theme.palette.mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />}
+      </IconButton>
+    </Tooltip>
+  );
+}
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -26,7 +42,6 @@ export default function Header() {
 
   const brand = import.meta.env.VITE_APP_NAME || "Interview Portal";
 
-  // Navigation items by role
   const publicLinks = [
     { to: "/apply-now", label: "Apply" },
     { to: "/login", label: "Login" },
@@ -57,18 +72,30 @@ export default function Header() {
   return (
     <AppBar position="sticky" elevation={0} color="primary">
       <Toolbar sx={{ gap: 1 }}>
-        <Typography
-          variant="h6"
-          sx={{ fontWeight: 800, letterSpacing: 0.2, flexGrow: 1 }}
+        {/* Logo + Brand */}
+        <Box
           component={Link}
           to="/"
-          color="inherit"
-          style={{ textDecoration: "none" }}
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            textDecoration: "none",
+            color: "inherit",
+            flexGrow: 1,
+          }}
         >
-          {brand}
-        </Typography>
+          <Box
+            component="img"
+            src={logo}
+            alt="ABHolistic Logo"
+            sx={{ height: 40, mr: 1 }}
+          />
+          <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: 0.2 }}>
+            {brand}
+          </Typography>
+        </Box>
 
-        {/* Desktop links */}
+        {/* Desktop Links */}
         <Box sx={{ display: { xs: "none", sm: "flex" }, gap: 1 }}>
           {links.map((l) => (
             <Button key={l.to} color="inherit" component={Link} to={l.to}>
@@ -80,10 +107,12 @@ export default function Header() {
               Logout
             </Button>
           )}
+          <ThemeToggle />
         </Box>
 
-        {/* Mobile menu */}
+        {/* Mobile Menu */}
         <Box sx={{ display: { xs: "flex", sm: "none" } }}>
+          <ThemeToggle />
           <IconButton
             color="inherit"
             onClick={handleMenu}
@@ -109,21 +138,19 @@ export default function Header() {
                 {l.label}
               </MenuItem>
             ))}
-
-            {user
-              ? [
-                  <Divider key="divider" />,
-                  <MenuItem
-                    key="logout"
-                    onClick={() => {
-                      handleClose();
-                      onLogout();
-                    }}
-                  >
-                    Logout
-                  </MenuItem>,
-                ]
-              : null}
+            {user && (
+              <>
+                <Divider />
+                <MenuItem
+                  onClick={() => {
+                    handleClose();
+                    onLogout();
+                  }}
+                >
+                  Logout
+                </MenuItem>
+              </>
+            )}
           </Menu>
         </Box>
       </Toolbar>

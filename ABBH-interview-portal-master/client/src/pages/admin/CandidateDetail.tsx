@@ -1,212 +1,350 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
-  Button,
+  Stack,
+  Typography,
+  Paper,
   Chip,
   Divider,
-  Link as MLink,
-  Paper,
-  Stack,
+  Button,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  CircularProgress,
+  Alert,
   TextField,
-  Typography,
 } from "@mui/material";
-import { useParams } from "react-router-dom";
-import api from "../../api/client";
+import { useNavigate, useParams } from "react-router-dom";
+import { api } from "../../lib/api";
 
+type Job = { id: string; title: string; location?: string | null };
 type Answer = {
-  id: number;
-  answerText: string;
-  question: { text: string; order: number };
+  id: string;
+  answer?: string | null;
+  score?: number | null;
+  notes?: string | null;
+  question: { text: string };
 };
-type Video = {
-  id: number;
-  videoPath: string;
-  question: { text: string; order: number };
-};
-type App = {
-  id: number;
-  stage: string;
-  stageStatus: string;
-  coverLetter: string;
-  resumePath: string;
-  finalInterviewLink?: string | null;
-  candidate: { email: string; fullName?: string | null; phone?: string | null }; // ← add
-  jobRole: { title: string };
+type Interview = {
+  id: string;
+  type: "WRITTEN" | "VIDEO";
+  durationMins: number;
+  submittedAt?: string | null;
   answers: Answer[];
-  videos: Video[];
-  events: Array<{
-    action: string;
-    stage: string;
-    createdAt: string;
-    note?: string | null;
-  }>;
+};
+type Application = {
+  id: string;
+  candidateName: string;
+  email: string;
+  phone?: string | null;
+  resumeUrl?: string | null;
+  coverLetter?: string | null;
+  stage: "APPLIED" | "SCREENING" | "INTERVIEW" | "OFFER" | "REJECTED";
+  status: "ACTIVE" | "WITHDRAWN";
+  overallScore?: number | null;
+  createdAt: string;
+  job: Job;
+  interviews: Interview[];
+};
+
+const STAGES: Application["stage"][] = [
+  "APPLIED",
+  "SCREENING",
+  "INTERVIEW",
+  "OFFER",
+  "REJECTED",
+];
+const stageColor: Record<
+  Application["stage"],
+  "default" | "primary" | "secondary" | "success" | "warning" | "error" | "info"
+> = {
+  APPLIED: "info",
+  SCREENING: "secondary",
+  INTERVIEW: "primary",
+  OFFER: "success",
+  REJECTED: "error",
 };
 
 export default function CandidateDetail() {
-  const { id } = useParams();
-  const [app, setApp] = useState<App | null>(null);
-  const [note, setNote] = useState("");
-  const [finalLink, setFinalLink] = useState("");
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
+  const [app, setApp] = useState<Application | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [stage, setStage] = useState<Application["stage"]>("APPLIED");
+  const [status, setStatus] = useState<Application["status"]>("ACTIVE");
+
+  // ---- Load application (NOTE the /api prefix) ----
   useEffect(() => {
     (async () => {
-      const { data } = await api.get(`/admin/applications/${id}`);
-      setApp(data);
-      setFinalLink(data?.finalInterviewLink || "");
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await api<Application>(`/api/applications/${id}`);
+        setApp(data);
+        setStage(data.stage);
+        setStatus(data.status);
+      } catch (e: any) {
+        setError(e?.message || "Failed to load application");
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [id]);
 
-  const decide = async (decision: "APPROVE" | "REJECT") => {
-    await api.post(`/admin/applications/${id}/decision`, { decision, note });
-    const { data } = await api.get(`/admin/applications/${id}`);
-    setApp(data);
-  };
-  const advance = async () => {
-    await api.post(`/admin/applications/${id}/advance`);
-    const { data } = await api.get(`/admin/applications/${id}`);
-    setApp(data);
-  };
-  const saveLink = async () => {
-    await api.post(`/admin/applications/${id}/final-link`, { link: finalLink });
-    const { data } = await api.get(`/admin/applications/${id}`);
-    setApp(data);
-  };
-  const revert = async () => {
-    await api.post(`/admin/applications/${id}/revert`);
-    const { data } = await api.get(`/admin/applications/${id}`);
-    setApp(data);
-  };
+  const interviews = useMemo(() => app?.interviews ?? [], [app]);
 
-  if (!app) return null;
+  async function save() {
+    if (!id) return;
+    try {
+      setSaving(true);
+      const updated = await api<Application>(`/api/applications/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ stage, status }),
+      });
+      setApp(updated);
+    } catch (e: any) {
+      setError(e?.message || "Failed to update");
+    } finally {
+      setSaving(false);
+    }
+  }
 
+  function nextStage() {
+    const idx = STAGES.indexOf(stage);
+    if (idx >= 0 && idx < STAGES.length - 1) setStage(STAGES[idx + 1]);
+  }
+
+  // ---- UI states ----
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          p: 4,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Stack sx={{ p: 3 }} spacing={2}>
+        <Alert severity="error">{error}</Alert>
+        <Button variant="outlined" onClick={() => navigate(-1)}>
+          Back
+        </Button>
+      </Stack>
+    );
+  }
+
+  if (!app) {
+    return (
+      <Stack sx={{ p: 3 }} spacing={2}>
+        <Alert severity="warning">Application not found.</Alert>
+        <Button variant="outlined" onClick={() => navigate(-1)}>
+          Back
+        </Button>
+      </Stack>
+    );
+  }
+
+  // ---- Main ----
   return (
-    <Box sx={{ p: 3 }}>
-      <Paper sx={{ p: 3 }}>
+    <Stack spacing={3} sx={{ p: { xs: 2, md: 3 } }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between">
+        <Stack spacing={0.5}>
+          <Typography variant="h5" fontWeight={800}>
+            {app.candidateName}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {app.email} {app.phone ? `• ${app.phone}` : ""}
+          </Typography>
+        </Stack>
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" onClick={() => navigate(-1)}>
+            Back
+          </Button>
+          <Button variant="contained" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save Changes"}
+          </Button>
+        </Stack>
+      </Stack>
+
+      <Paper variant="outlined" sx={{ borderRadius: 3, p: 2 }}>
         <Stack spacing={2}>
-          <Typography variant="h5" fontWeight={700}>
-            {app.candidate.fullName || app.candidate.email}
+          <Typography variant="subtitle2" color="text.secondary">
+            Job
           </Typography>
-          <Typography>
-            Contact: <b>{app.candidate.email}</b>
-            {app.candidate.phone ? `  •  ${app.candidate.phone}` : ""}
+          <Typography variant="h6" fontWeight={700}>
+            {app.job?.title ?? "—"}{" "}
+            {app.job?.location ? `— ${app.job.location}` : ""}
           </Typography>
-          <Stack direction="row" spacing={1}>
-            <Chip label={`Stage: ${app.stage}`} color="primary" />
-            <Chip label={`Status: ${app.stageStatus}`} />
-          </Stack>
 
           <Divider />
-          <Typography variant="h6" fontWeight={700}>
-            Documents
-          </Typography>
-          <MLink href={app.resumePath} target="_blank">
-            Download Resume
-          </MLink>
-          <Typography fontWeight={700}>Cover Letter</Typography>
-          <Typography whiteSpace="pre-wrap">{app.coverLetter}</Typography>
 
-          <Divider />
-          <Typography variant="h6" fontWeight={700}>
-            Written Answers
-          </Typography>
-          <Stack spacing={2}>
-            {app.answers
-              .sort((a, b) => a.question.order - b.question.order)
-              .map((a) => (
-                <Stack key={a.id}>
-                  <Typography fontWeight={700}>
-                    {a.question.order}. {a.question.text}
-                  </Typography>
-                  <Typography whiteSpace="pre-wrap">{a.answerText}</Typography>
-                </Stack>
-              ))}
-          </Stack>
-
-          <Divider />
-          <Typography variant="h6" fontWeight={700}>
-            Video Answers
-          </Typography>
-          <Stack spacing={2}>
-            {app.videos
-              .sort((a, b) => a.question.order - b.question.order)
-              .map((v) => (
-                <Stack key={v.id}>
-                  <Typography fontWeight={700}>
-                    {v.question.order}. {v.question.text}
-                  </Typography>
-                  <video
-                    src={v.videoPath}
-                    controls
-                    style={{ width: "100%", borderRadius: 12 }}
-                  />
-                </Stack>
-              ))}
-          </Stack>
-
-          <Divider />
-          <Typography variant="h6" fontWeight={700}>
-            Decisions
-          </Typography>
-          <TextField
-            label="Note (optional)"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-
-          <Stack direction="row" spacing={2}>
-            <Button variant="outlined" onClick={() => decide("REJECT")}>
-              Reject
-            </Button>
-            <Button variant="contained" onClick={() => decide("APPROVE")}>
-              Approve
-            </Button>
-            <Button variant="contained" color="secondary" onClick={advance}>
+          <Stack
+            direction="row"
+            spacing={2}
+            alignItems="center"
+            flexWrap="wrap"
+          >
+            <Chip
+              size="small"
+              label={`Stage: ${stage}`}
+              color={stageColor[stage]}
+            />
+            <Chip size="small" label={`Status: ${status}`} />
+            <FormControl size="small" sx={{ minWidth: 180 }}>
+              <InputLabel id="stage-label">Change Stage</InputLabel>
+              <Select
+                labelId="stage-label"
+                label="Change Stage"
+                value={stage}
+                onChange={(e) => setStage(e.target.value as any)}
+              >
+                {STAGES.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 160 }}>
+              <InputLabel id="status-label">Status</InputLabel>
+              <Select
+                labelId="status-label"
+                label="Status"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as any)}
+              >
+                <MenuItem value="ACTIVE">ACTIVE</MenuItem>
+                <MenuItem value="WITHDRAWN">WITHDRAWN</MenuItem>
+              </Select>
+            </FormControl>
+            <Button
+              size="small"
+              variant="text"
+              onClick={nextStage}
+              disabled={stage === "REJECTED" || stage === "OFFER"}
+            >
               Move to Next Stage
             </Button>
-            <Button
-              variant="outlined"
-              color="secondary"
-              onClick={revert}
-              disabled={app.stage === "APPLIED"}
-            >
-              Move to Previous Stage
-            </Button>
           </Stack>
 
-          {app.stage === "FINAL" && (
-            <>
-              <Divider />
-              <Typography variant="h6" fontWeight={700}>
-                Final Interview Link
+          <Divider />
+
+          <Stack spacing={1}>
+            <Typography variant="subtitle2" color="text.secondary">
+              Resume
+            </Typography>
+            {app.resumeUrl ? (
+              <a href={app.resumeUrl} target="_blank" rel="noreferrer">
+                {app.resumeUrl}
+              </a>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No resume provided
               </Typography>
-              <Stack direction="row" spacing={2}>
-                <TextField
-                  fullWidth
-                  label="Meeting URL"
-                  value={finalLink}
-                  onChange={(e) => setFinalLink(e.target.value)}
-                />
-                <Button variant="contained" onClick={saveLink}>
-                  Save
-                </Button>
-              </Stack>
-            </>
-          )}
+            )}
+          </Stack>
 
           <Divider />
-          <Typography variant="h6" fontWeight={700}>
-            Activity
-          </Typography>
+
           <Stack spacing={1}>
-            {app.events.map((ev) => (
-              <Typography key={`${ev.createdAt}-${ev.action}`}>
-                [{new Date(ev.createdAt).toLocaleString()}] <b>{ev.stage}</b> –{" "}
-                {ev.action} {ev.note ? `– ${ev.note}` : ""}
+            <Typography variant="subtitle2" color="text.secondary">
+              Cover Letter
+            </Typography>
+            {app.coverLetter ? (
+              <TextField
+                value={app.coverLetter}
+                multiline
+                minRows={5}
+                fullWidth
+                InputProps={{ readOnly: true }}
+              />
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No cover letter provided
               </Typography>
-            ))}
+            )}
           </Stack>
         </Stack>
       </Paper>
-    </Box>
+
+      <Paper variant="outlined" sx={{ borderRadius: 3, p: 2 }}>
+        <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>
+          Interviews
+        </Typography>
+        {interviews.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            No interviews yet.
+          </Typography>
+        ) : (
+          <Stack spacing={2}>
+            {interviews.map((iv) => (
+              <Box
+                key={iv.id}
+                sx={{
+                  p: 1.5,
+                  border: 1,
+                  borderColor: "divider",
+                  borderRadius: 2,
+                }}
+              >
+                <Stack
+                  direction="row"
+                  justifyContent="space-between"
+                  alignItems="center"
+                >
+                  <Typography fontWeight={700}>
+                    {iv.type} • {iv.durationMins} mins
+                  </Typography>
+                  <Chip
+                    size="small"
+                    label={iv.submittedAt ? "Submitted" : "Pending"}
+                    color={iv.submittedAt ? "success" : "default"}
+                  />
+                </Stack>
+                <Divider sx={{ my: 1 }} />
+                {iv.answers.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    No answers.
+                  </Typography>
+                ) : (
+                  <Stack spacing={1}>
+                    {iv.answers.map((a) => (
+                      <Box key={a.id}>
+                        <Typography variant="body2" fontWeight={700}>
+                          {a.question.text}
+                        </Typography>
+                        <Typography
+                          variant="body2"
+                          sx={{ whiteSpace: "pre-wrap" }}
+                        >
+                          {a.answer || "—"}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Score: {a.score ?? "—"}{" "}
+                          {a.notes ? `• ${a.notes}` : ""}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                )}
+              </Box>
+            ))}
+          </Stack>
+        )}
+      </Paper>
+    </Stack>
   );
 }
