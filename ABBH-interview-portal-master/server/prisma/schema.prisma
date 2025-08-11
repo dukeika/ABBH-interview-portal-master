@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+
+model Job {
+  id          String   @id @default(cuid())
+  title       String
+  department  String?
+  location    String?
+  description String
+  status      JobStatus @default(DRAFT)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  applications Application[]
+}
+
+model Application {
+  id            String     @id @default(cuid())
+  jobId         String
+  candidateName String
+  email         String
+  phone         String?
+  resumeUrl     String?
+  stage         Stage       @default(APPLIED)
+  status        AppStatus   @default(ACTIVE)
+  overallScore  Float?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  job           Job         @relation(fields: [jobId], references: [id])
+  interviews    Interview[]
+}
+
+model Interview {
+  id            String         @id @default(cuid())
+  applicationId String
+  type          InterviewType
+  durationMins  Int             @default(30)
+  startAt       DateTime?
+  endAt         DateTime?
+  submittedAt   DateTime?
+
+  application   Application     @relation(fields: [applicationId], references: [id])
+  answers       InterviewAnswer[]
+}
+
+model Question {
+  id         String    @id @default(cuid())
+  text       String
+  category   String?
+  difficulty Int       @default(1)
+  weight     Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  answers    InterviewAnswer[]
+}
+
+model InterviewAnswer {
+  id           String    @id @default(cuid())
+  interviewId  String
+  questionId   String
+  answer       String?
+  score        Float?
+  notes        String?
+
+  interview    Interview @relation(fields: [interviewId], references: [id])
+  question     Question  @relation(fields: [questionId], references: [id])
+}
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String    // <-- required
+  role      Role      @default(CANDIDATE)
+  fullName  String?
+  phone     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  // ...relations
+}
+
+enum Role {
+  CANDIDATE
+  HR
+  ADMIN
+}
+enum JobStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum Stage {
+  APPLIED
+  SCREENING
+  INTERVIEW
+  OFFER
+  REJECTED
+}
+
+enum AppStatus {
+  ACTIVE
+  WITHDRAWN
+}
+
+enum InterviewType {
+  WRITTEN
+  VIDEO
+}
