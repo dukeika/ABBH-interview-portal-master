@@ -16,10 +16,10 @@ import {
   Chip,
 } from "@mui/material";
 import type { AxiosProgressEvent } from "axios";
-import { api } from "../../lib/api"; // <- adjust if your api helper path differs
-import dayjs from "../../lib/dayjs"; // <- your existing TZ-configured dayjs
+import { api } from "../../lib/api";
+import dayjs from "../../lib/dayjs";
 
-/* -------- Types returned by the backend -------- */
+/* ---------- API types ---------- */
 type Question = { id: string; text: string };
 type InterviewInfo = {
   interview: {
@@ -33,7 +33,7 @@ type InterviewInfo = {
   questions: Question[];
 };
 
-/* -------- Local UI types -------- */
+/* ---------- Local UI state ---------- */
 type QStatus =
   | "idle"
   | "recording"
@@ -48,6 +48,7 @@ type QState = {
   previewUrl?: string;
   blob?: Blob | null;
   progress?: number;
+  attemptCount?: number; // server returns this after upload
 };
 
 export default function VideoInterview() {
@@ -75,7 +76,7 @@ export default function VideoInterview() {
     [qs]
   );
 
-  // Load interview + questions
+  /* ---------- Load interview ---------- */
   useEffect(() => {
     let mounted = true;
 
@@ -91,6 +92,7 @@ export default function VideoInterview() {
             id: q.id,
             text: q.text,
             status: "idle",
+            attemptCount: 0,
           }))
         );
       } catch (e: any) {
@@ -113,7 +115,7 @@ export default function VideoInterview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interviewId]);
 
-  /* -------- Media helpers -------- */
+  /* ---------- Media helpers ---------- */
   function cleanupMedia() {
     try {
       if (recorderRef.current && recorderRef.current.state !== "inactive") {
@@ -126,6 +128,7 @@ export default function VideoInterview() {
 
   async function ensureStream() {
     if (streamRef.current) return streamRef.current;
+    // ask for cam + mic
     const stream = await navigator.mediaDevices.getUserMedia({
       video: true,
       audio: true,
@@ -133,7 +136,7 @@ export default function VideoInterview() {
     streamRef.current = stream;
     if (liveVideoRef.current) {
       try {
-        liveVideoRef.current.srcObject = stream;
+        (liveVideoRef.current as any).srcObject = stream;
         await liveVideoRef.current.play().catch(() => {});
       } catch {}
     }
@@ -145,6 +148,7 @@ export default function VideoInterview() {
       "video/webm;codecs=vp9,opus",
       "video/webm;codecs=vp8,opus",
       "video/webm",
+      "video/mp4", // some browsers might allow this
     ];
     for (const mt of list) {
       if ((window as any).MediaRecorder?.isTypeSupported?.(mt))
@@ -155,6 +159,11 @@ export default function VideoInterview() {
 
   async function startRecording(qid: string) {
     if (isRecording) return;
+    const q = qs.find((x) => x.id === qid);
+    if (q?.attemptCount !== undefined && q.attemptCount >= 3) {
+      setErr("Max attempts reached (3) for this question.");
+      return;
+    }
     try {
       setErr("");
       await ensureStream();
@@ -171,14 +180,20 @@ export default function VideoInterview() {
         if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data);
       };
       rec.onstop = () => {
-        const blob = new Blob(chunksRef.current, {
-          type: (opts.mimeType as string) || "video/webm",
-        });
+        // Normalize MIME to a base container ("video/webm" or "video/mp4")
+        const mimeBase = (rec.mimeType || "video/webm").split(";")[0];
+        const blob = new Blob(chunksRef.current, { type: mimeBase });
         const url = URL.createObjectURL(blob);
         setQs((prev) =>
           prev.map((q) =>
             q.id === qid
-              ? { ...q, status: "recorded", previewUrl: url, blob }
+              ? {
+                  ...q,
+                  status: "recorded",
+                  previewUrl: url,
+                  blob,
+                  progress: undefined,
+                }
               : q
           )
         );
@@ -225,6 +240,11 @@ export default function VideoInterview() {
     const q = qs.find((x) => x.id === qid);
     if (!q?.blob) return;
 
+    if (q.attemptCount !== undefined && q.attemptCount >= 3) {
+      setErr("Max attempts reached (3) for this question.");
+      return;
+    }
+
     try {
       setQs((prev) =>
         prev.map((x) =>
@@ -232,30 +252,38 @@ export default function VideoInterview() {
         )
       );
 
+      const mimeBase = (q.blob?.type || "video/webm").split(";")[0];
+      const ext = mimeBase === "video/mp4" ? ".mp4" : ".webm";
+
       const fd = new FormData();
-      fd.append("file", q.blob, `${qid}.webm`);
+      fd.append("file", q.blob, `${qid}${ext}`);
       fd.append("questionId", qid);
 
-      await api.post<{ filePath: string }>(
-        `/interviews/${interviewId}/video/upload`,
-        fd,
-        {
-          headers: { "Content-Type": "multipart/form-data" },
-          onUploadProgress: (ev: AxiosProgressEvent) => {
-            const total = ev.total ?? 0;
-            const loaded = ev.loaded ?? 0;
-            const p =
-              total > 0 ? Math.round((loaded / total) * 100) : undefined;
-            setQs((prev) =>
-              prev.map((x) => (x.id === qid ? { ...x, progress: p } : x))
-            );
-          },
-        }
-      );
+      const { data } = await api.post<{
+        filePath: string;
+        attemptCount: number;
+      }>(`/interviews/${interviewId}/video/upload`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (ev: AxiosProgressEvent) => {
+          const total = ev.total ?? 0;
+          const loaded = ev.loaded ?? 0;
+          const p = total > 0 ? Math.round((loaded / total) * 100) : undefined;
+          setQs((prev) =>
+            prev.map((x) => (x.id === qid ? { ...x, progress: p } : x))
+          );
+        },
+      });
 
       setQs((prev) =>
         prev.map((x) =>
-          x.id === qid ? { ...x, status: "uploaded", progress: 100 } : x
+          x.id === qid
+            ? {
+                ...x,
+                status: "uploaded",
+                progress: 100,
+                attemptCount: data.attemptCount,
+              }
+            : x
         )
       );
     } catch (e: any) {
@@ -276,7 +304,7 @@ export default function VideoInterview() {
     }
   }
 
-  /* -------- Render -------- */
+  /* ---------- Render ---------- */
   if (loading) {
     return (
       <Box p={4} display="flex" justifyContent="center">
@@ -329,76 +357,101 @@ export default function VideoInterview() {
             </Typography>
 
             <List dense>
-              {qs.map((q) => (
-                <ListItem key={q.id} sx={{ alignItems: "stretch", mb: 1 }}>
-                  <Box sx={{ width: "100%" }}>
-                    <ListItemText
-                      primary={
-                        <Typography fontWeight={600}>{q.text}</Typography>
-                      }
-                      secondary={
-                        <Stack spacing={1}>
-                          {q.status === "uploading" && (
-                            <LinearProgress
-                              variant={
-                                q.progress ? "determinate" : "indeterminate"
-                              }
-                              value={q.progress}
-                            />
-                          )}
+              {qs.map((q) => {
+                const disabledByAttempts = (q.attemptCount ?? 0) >= 3;
+                return (
+                  <ListItem key={q.id} sx={{ alignItems: "stretch", mb: 1 }}>
+                    <Box sx={{ width: "100%" }}>
+                      <ListItemText
+                        primary={
+                          <Typography fontWeight={600}>{q.text}</Typography>
+                        }
+                        secondary={
+                          <Stack spacing={1}>
+                            {q.status === "uploading" && (
+                              <LinearProgress
+                                variant={
+                                  q.progress ? "determinate" : "indeterminate"
+                                }
+                                value={q.progress}
+                              />
+                            )}
 
-                          {q.previewUrl && (
-                            <video
-                              src={q.previewUrl}
-                              controls
-                              style={{
-                                width: "100%",
-                                borderRadius: 8,
-                                background: "#000",
-                              }}
-                            />
-                          )}
+                            {q.previewUrl && (
+                              <video
+                                src={q.previewUrl}
+                                controls
+                                style={{
+                                  width: "100%",
+                                  borderRadius: 8,
+                                  background: "#000",
+                                }}
+                              />
+                            )}
 
-                          <Stack direction="row" spacing={1} flexWrap="wrap">
-                            <Button
-                              variant="contained"
-                              onClick={() => startRecording(q.id)}
-                              disabled={q.status === "recording" || isRecording}
+                            <Stack
+                              direction="row"
+                              spacing={1}
+                              flexWrap="wrap"
+                              alignItems="center"
                             >
-                              Record
-                            </Button>
-                            <Button
-                              variant="outlined"
-                              onClick={() => stopRecording(q.id)}
-                              disabled={q.status !== "recording"}
-                            >
-                              Stop
-                            </Button>
-                            <Button
-                              variant="outlined"
-                              color="warning"
-                              onClick={() => retake(q.id)}
-                              disabled={q.status === "recording"}
-                            >
-                              Retake
-                            </Button>
-                            <Button
-                              variant="contained"
-                              color="success"
-                              onClick={() => upload(q.id)}
-                              disabled={q.status !== "recorded"}
-                            >
-                              Upload
-                            </Button>
+                              <Button
+                                variant="contained"
+                                onClick={() => startRecording(q.id)}
+                                disabled={
+                                  q.status === "recording" ||
+                                  isRecording ||
+                                  disabledByAttempts
+                                }
+                              >
+                                Record
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                onClick={() => stopRecording(q.id)}
+                                disabled={q.status !== "recording"}
+                              >
+                                Stop
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                color="warning"
+                                onClick={() => retake(q.id)}
+                                disabled={q.status === "recording"}
+                              >
+                                Retake
+                              </Button>
+                              <Button
+                                variant="contained"
+                                color="success"
+                                onClick={() => upload(q.id)}
+                                disabled={
+                                  q.status !== "recorded" || disabledByAttempts
+                                }
+                              >
+                                Upload
+                              </Button>
 
-                            <StatusChip status={q.status} />
+                              <StatusChip status={q.status} />
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                label={`Attempts: ${q.attemptCount ?? 0}/3`}
+                                color={
+                                  (q.attemptCount ?? 0) >= 3
+                                    ? "error"
+                                    : "default"
+                                }
+                              />
+                            </Stack>
                           </Stack>
-                        </Stack>
-                      }
-                    />
-                  </Box>
-                </ListItem>
-              ))}
+                        }
+                        secondaryTypographyProps={{ component: "div" }} // fix <div> inside <p> warning
+                      />
+                    </Box>
+                  </ListItem>
+                );
+              })}
             </List>
 
             <Stack direction="row" justifyContent="flex-end" mt={2} spacing={2}>
@@ -420,7 +473,7 @@ export default function VideoInterview() {
   );
 }
 
-/* -------- Small UI bits -------- */
+/* ---------- Small UI bits ---------- */
 function StatusChip({ status }: { status: QStatus }) {
   const map: Record<
     QStatus,
@@ -443,6 +496,7 @@ function StatusChip({ status }: { status: QStatus }) {
       color={v.color}
       size="small"
       variant={v.color === "default" ? "outlined" : "filled"}
+      sx={{ ml: 0.5 }}
     />
   );
 }
