@@ -66,6 +66,9 @@ const stageColor: Record<
   REJECTED: "error",
 };
 
+const jobs = await api("/api/jobs");
+const apps = await api("/api/applications");
+
 export default function AdminDashboard() {
   const navigate = useNavigate();
 

@@ -1,180 +1,132 @@
-import {
-  PrismaClient,
-  JobStatus,
-  Stage,
-  AppStatus,
-  InterviewType,
-} from "@prisma/client";
+import pkg from "@prisma/client";
+import bcrypt from "bcryptjs";
+import "dotenv/config";
+
+const { PrismaClient } = pkg;
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("🌱 Starting seed...");
+  console.log("🌱 Seeding…");
 
-  // Wipe existing data (dev only)
-  await prisma.interviewAnswer.deleteMany();
-  await prisma.interview.deleteMany();
-  await prisma.application.deleteMany();
-  await prisma.question.deleteMany();
-  await prisma.job.deleteMany();
-
-  console.log("🗑 Cleared existing records.");
-
-  // ---------------- JOBS ----------------
-  const jobs = await prisma.job.createMany({
-    data: [
-      {
-        title: "Frontend Engineer",
-        department: "Engineering",
-        location: "Remote",
-        description:
-          "Build a modern interview platform UI with React, MUI, and modern tooling.",
-        status: JobStatus.PUBLISHED,
-      },
-      {
-        title: "Backend Engineer",
-        department: "Engineering",
-        location: "Lagos, NG",
-        description:
-          "Design reliable APIs and services using Node.js, Prisma, and PostgreSQL.",
-        status: JobStatus.PUBLISHED,
-      },
-      {
-        title: "Product Manager",
-        department: "Product",
-        location: "Hybrid - Abuja",
-        description:
-          "Drive product vision and delivery for the interview platform.",
-        status: JobStatus.DRAFT,
-      },
-      {
-        title: "QA Engineer",
-        department: "Quality Assurance",
-        location: "Remote",
-        description:
-          "Ensure product quality with automated and manual testing.",
-        status: JobStatus.CLOSED,
-      },
-    ],
+  // Jobs
+  const feJob = await prisma.job.upsert({
+    where: { id: "job-fe" },
+    update: {},
+    create: {
+      id: "job-fe",
+      title: "Frontend Engineer",
+      department: "Engineering",
+      location: "Remote",
+      description: "Build delightful web UI.",
+      status: "PUBLISHED",
+    },
   });
 
-  const jobList = await prisma.job.findMany();
-  console.log(`📌 Created ${jobList.length} jobs.`);
-
-  // ---------------- QUESTIONS ----------------
-  await prisma.question.createMany({
-    data: [
-      {
-        text: "Explain the event loop in JavaScript.",
-        category: "JavaScript",
-        difficulty: 3,
-        weight: 2,
-      },
-      {
-        text: "What is Prisma and how does it simplify database access?",
-        category: "Backend",
-        difficulty: 2,
-        weight: 1,
-      },
-      {
-        text: "Design an API for job applications.",
-        category: "System Design",
-        difficulty: 4,
-        weight: 3,
-      },
-      {
-        text: "How do you secure an Express API?",
-        category: "Security",
-        difficulty: 2,
-        weight: 2,
-      },
-      {
-        text: "Describe your approach to debugging a complex production issue.",
-        category: "General",
-        difficulty: 3,
-        weight: 2,
-      },
-      {
-        text: "What is the difference between unit tests and integration tests?",
-        category: "Testing",
-        difficulty: 1,
-        weight: 1,
-      },
-    ],
+  const bhcJob = await prisma.job.upsert({
+    where: { id: "job-bhc" },
+    update: {},
+    create: {
+      id: "job-bhc",
+      title: "Behavioral Health Counselor",
+      department: "Clinical",
+      location: "Lagos",
+      description: "Provide holistic behavioral health support.",
+      status: "PUBLISHED",
+    },
   });
 
-  const questions = await prisma.question.findMany();
-  console.log(`❓ Created ${questions.length} questions.`);
-
-  // ---------------- APPLICATIONS ----------------
-  const applications = [];
-  for (let i = 0; i < jobList.length; i++) {
-    const job = jobList[i];
-
-    const app1 = await prisma.application.create({
-      data: {
-        jobId: job.id,
-        candidateName: `Candidate ${i + 1}A`,
-        email: `candidate${i + 1}a@example.com`,
-        phone: "+2348000000000",
-        resumeUrl: "",
-        stage: Stage.APPLIED,
-        status: AppStatus.ACTIVE,
+  // Questions
+  const mkQ = (id, job, text, forStage) =>
+    prisma.question.upsert({
+      where: { id },
+      update: {},
+      create: {
+        id,
+        text,
+        forStage,
+        type: "OPEN",
+        job: { connect: { id: job.id } },
       },
     });
 
-    const app2 = await prisma.application.create({
-      data: {
-        jobId: job.id,
-        candidateName: `Candidate ${i + 1}B`,
-        email: `candidate${i + 1}b@example.com`,
-        phone: "+2348000000001",
-        resumeUrl: "",
-        stage: Stage.INTERVIEW,
-        status: AppStatus.ACTIVE,
-      },
-    });
+  await mkQ("q-fe-1", feJob, "Explain the virtual DOM.", "WRITTEN");
+  await mkQ(
+    "q-fe-2",
+    feJob,
+    "How do you optimize React performance?",
+    "WRITTEN"
+  );
+  await mkQ(
+    "q-fe-v1",
+    feJob,
+    "Record a short intro and walk through a UI bug you fixed.",
+    "VIDEO"
+  );
 
-    applications.push(app1, app2);
-  }
-  console.log(`📄 Created ${applications.length} applications.`);
+  await mkQ(
+    "q-bhc-1",
+    bhcJob,
+    "Describe a CBT intervention you’ve used.",
+    "WRITTEN"
+  );
+  await mkQ(
+    "q-bhc-2",
+    bhcJob,
+    "How do you ensure cultural competence?",
+    "WRITTEN"
+  );
+  await mkQ(
+    "q-bhc-v1",
+    bhcJob,
+    "Record a short intro describing your counseling style.",
+    "VIDEO"
+  );
 
-  // ---------------- INTERVIEWS & ANSWERS ----------------
-  for (const app of applications.filter((a) => a.stage === Stage.INTERVIEW)) {
-    const interview = await prisma.interview.create({
-      data: {
-        applicationId: app.id,
-        type: InterviewType.WRITTEN,
-        durationMins: 45,
-        startAt: new Date(),
-        endAt: new Date(Date.now() + 45 * 60000),
-      },
-    });
+  // Candidate (login-ready)
+  const plain = "Passw0rd!";
+  const passwordHash = await bcrypt.hash(plain, 10);
 
-    // Pick 2 random questions for this interview
-    const pickedQuestions = questions
-      .sort(() => 0.5 - Math.random())
-      .slice(0, 2);
+  const candidate = await prisma.candidate.upsert({
+    where: { email: "candidate@example.com" },
+    update: { name: "Sample Candidate" },
+    create: {
+      id: "cand-seed-1",
+      email: "candidate@example.com",
+      name: "Sample Candidate",
+      firstName: "Sample",
+      lastName: "Candidate",
+      passwordHash, // bcrypt hash of Passw0rd!
+    },
+  });
 
-    for (const q of pickedQuestions) {
-      await prisma.interviewAnswer.create({
-        data: {
-          interviewId: interview.id,
-          questionId: q.id,
-          answer: `Sample answer for question: ${q.text}`,
-          score: Math.floor(Math.random() * 5) + 1, // score 1-5
-          notes: "Auto-scored for seed data",
-        },
-      });
-    }
-  }
-  console.log("📝 Created sample interviews with answers.");
+  // Application
+  await prisma.application.upsert({
+    where: { id: "app-seed-fe-1" },
+    update: {},
+    create: {
+      id: "app-seed-fe-1",
+      stage: "SCREENING",
+      status: "ACTIVE",
+      candidateName: candidate.name,
+      email: candidate.email,
+      phone: "0800-000-0000",
+      resumeUrl: "https://example.com/resume.pdf",
+      coverLetter: "I love building accessible UIs.",
+      job: { connect: { id: feJob.id } },
+      candidate: { connect: { id: candidate.id } },
+    },
+  });
 
-  console.log("✅ Seed complete.");
+  console.log(
+    "✅ Seeding done. Candidate login → candidate@example.com / Passw0rd!"
+  );
 }
 
 main()
   .catch((e) => {
-    console.error("❌ Seed failed:", e);
+    console.error(e);
     process.exit(1);
   })
-  .finally(async () => prisma.$disconnect());
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

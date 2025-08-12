@@ -3,128 +3,131 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"              // dev: simple & local
+  url      = env("DATABASE_URL")   // e.g. file:./prisma/dev.db
 }
 
+// ---- Enums ----
+enum Stage {
+  APPLIED
+  SCREENING
+  WRITTEN
+  VIDEO
+  FINAL_CALL
+  OFFER
+  REJECTED
+}
 
+enum QuestionType {
+  OPEN
+}
+
+enum InterviewType {
+  WRITTEN
+  VIDEO
+}
+
+// ---- Models ----
 model Job {
-  id          String   @id @default(cuid())
-  title       String
-  department  String?
-  location    String?
-  description String
-  status      JobStatus @default(DRAFT)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String        @id @default(cuid())
+  title        String
+  department   String?
+  location     String?
+  description  String
+  status       String        @default("PUBLISHED")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  applications Application[]
+  questions    Question[]
+  interviews   Interview[]
+}
+
+model Candidate {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  // keep both name and first/last optional so older UI still works
+  name         String?
+  firstName    String?
+  lastName     String?
+  passwordHash String
+  createdAt    DateTime      @default(now())
 
   applications Application[]
 }
 
-model Candidate {
-  id            String   @id @default(cuid())
-  name          String
-  email         String   @unique
-  passwordHash  String
-  createdAt     DateTime @default(now())
-  applications  Application[]
-}
-
 model Application {
-  id            String     @id @default(cuid())
-  jobId         String
-  candidateId   String?    // new (nullable for old rows)
-  candidateName String
-  email         String
-  phone         String?
-  resumeUrl     String?
-  coverLetter   String?
-  stage         Stage       @default(APPLIED)
-  status        AppStatus   @default(ACTIVE)
-  overallScore  Float?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id             String     @id @default(cuid())
+  jobId          String
+  candidateId    String?
+  // optional meta used by UI / forms
+  candidateName  String?
+  email          String?
+  phone          String?
+  resumeUrl      String?
+  coverLetter    String?
 
-  job           Job         @relation(fields: [jobId], references: [id])
-  candidate     Candidate?  @relation(fields: [candidateId], references: [id])
-  interviews    Interview[]
-}
+  stage          Stage      @default(APPLIED)
+  status         String     @default("ACTIVE")
+  overallScore   Float?
+  finalCallUrl   String?
+  finalCallAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
-
-
-model Interview {
-  id            String         @id @default(cuid())
-  applicationId String
-  type          InterviewType
-  durationMins  Int             @default(30)
-  startAt       DateTime?
-  endAt         DateTime?
-  submittedAt   DateTime?
-
-  application   Application     @relation(fields: [applicationId], references: [id])
-  answers       InterviewAnswer[]
+  job            Job        @relation(fields: [jobId], references: [id])
+  candidate      Candidate? @relation(fields: [candidateId], references: [id])
+  interviews     Interview[]
 }
 
 model Question {
-  id         String    @id @default(cuid())
-  text       String
-  category   String?
-  difficulty Int       @default(1)
-  weight     Int       @default(1)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id             String       @id @default(cuid())
+  jobId          String
+  text           String
+  type           QuestionType @default(OPEN)
+  forStage       Stage        @default(WRITTEN)
+  createdAt      DateTime     @default(now())
 
-  answers    InterviewAnswer[]
+  job            Job          @relation(fields: [jobId], references: [id])
+  answers        Answer[]
+  videoResponses VideoResponse[]
 }
 
-model InterviewAnswer {
-  id           String    @id @default(cuid())
+model Interview {
+  id            String        @id @default(cuid())
+  applicationId String
+  jobId         String
+  type          InterviewType
+  assignedAt    DateTime      @default(now())
+  submittedAt   DateTime?
+  durationMins  Int           @default(30)
+
+  application   Application   @relation(fields: [applicationId], references: [id])
+  job           Job           @relation(fields: [jobId], references: [id])
+  answers       Answer[]
+  videos        VideoResponse[]
+}
+
+model Answer {
+  id           String     @id @default(cuid())
   interviewId  String
   questionId   String
   answer       String?
   score        Float?
   notes        String?
 
-  interview    Interview @relation(fields: [interviewId], references: [id])
-  question     Question  @relation(fields: [questionId], references: [id])
-}
-model User {
-  id        Int       @id @default(autoincrement())
-  email     String    @unique
-  password  String    // <-- required
-  role      Role      @default(CANDIDATE)
-  fullName  String?
-  phone     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  // ...relations
+  interview    Interview  @relation(fields: [interviewId], references: [id])
+  question     Question   @relation(fields: [questionId], references: [id])
 }
 
-enum Role {
-  CANDIDATE
-  HR
-  ADMIN
-}
-enum JobStatus {
-  DRAFT
-  PUBLISHED
-  CLOSED
-}
+model VideoResponse {
+  id           String     @id @default(cuid())
+  interviewId  String
+  questionId   String?
+  filePath     String
+  durationSec  Int?
+  createdAt    DateTime   @default(now())
 
-enum Stage {
-  APPLIED
-  SCREENING
-  INTERVIEW
-  OFFER
-  REJECTED
-}
-
-enum AppStatus {
-  ACTIVE
-  WITHDRAWN
-}
-
-enum InterviewType {
-  WRITTEN
-  VIDEO
+  interview    Interview  @relation(fields: [interviewId], references: [id])
+  question     Question?  @relation(fields: [questionId], references: [id])
 }

@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+# keep these as binary
+*.png binary
+*.jpg binary
+*.webm binary
+*.mp4 binary
+*.pdf binary
+*.db  binary

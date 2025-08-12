@@ -4,17 +4,7 @@ import { prisma } from "../db/prisma.js";
 
 const r = Router();
 
-/**
- * GET /api/application-status
- *  - Requires Bearer token for role=CANDIDATE
- *  - Query:
- *     - latest=true  → return only the most recent application
- *     - jobId=...    → filter to a specific job (optional)
- *
- * Returns:
- *   - latest=true → single object or null
- *   - default     → array of applications (desc by createdAt)
- */
+// Candidate view: latest or all
 r.get("/", async (req, res) => {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
@@ -27,35 +17,35 @@ r.get("/", async (req, res) => {
     return res.status(401).json({ error: "Invalid token" });
   }
 
-  if (payload?.role !== "CANDIDATE") {
+  if (payload?.role !== "CANDIDATE")
     return res.status(403).json({ error: "Forbidden" });
-  }
 
-  const { latest, jobId } = req.query;
+  const { latest } = req.query;
+  const apps = await prisma.application.findMany({
+    where: { candidateId: payload.sub },
+    include: { job: true },
+    orderBy: { createdAt: "desc" },
+  });
 
-  const where = {
-    candidateId: payload.sub,
-    jobId: jobId || undefined,
-  };
+  return res.json(latest === "true" ? apps[0] || null : apps);
+});
 
-  try {
-    const apps = await prisma.application.findMany({
-      where,
-      include: {
-        job: true,
-        interviews: { include: { answers: { include: { question: true } } } },
+// server/src/routes/application-status.routes.js
+r.get("/", async (req, res) => {
+  // ...verify token...
+  const { latest } = req.query;
+  const apps = await prisma.application.findMany({
+    where: { candidateId: payload.sub },
+    include: {
+      job: true,
+      interviews: {
+        select: { id: true, type: true },
+        orderBy: { assignedAt: "desc" },
       },
-      orderBy: { createdAt: "desc" },
-    });
-
-    if (latest === "true") {
-      return res.json(apps[0] || null);
-    }
-    res.json(apps);
-  } catch (e) {
-    console.error("application-status error:", e);
-    res.status(500).json({ error: "Failed to fetch application status" });
-  }
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  return res.json(latest === "true" ? apps[0] || null : apps);
 });
 
 export default r;
