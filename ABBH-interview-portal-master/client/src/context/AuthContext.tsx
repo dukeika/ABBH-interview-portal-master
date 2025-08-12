@@ -1,98 +1,91 @@
-// client/src/context/AuthContext.tsx
-import React, { createContext, useContext, useEffect, useState } from "react";
-import api from "../api/client";
+import React, { createContext, useContext, useState } from "react";
+import { api, setToken as saveToken, clearToken, getToken } from "../lib/api";
 
 type Role = "CANDIDATE" | "HR";
-type User = { id: string; email: string; role: Role; name?: string };
+type User = { id: string; email: string; role: Role; name?: string | null };
 
 type AuthCtx = {
   user: User | null;
   token: string | null;
+  loading: boolean;
+  error: string | null;
   login: (email: string, password: string) => Promise<void>;
-  register: (
-    email: string,
-    password: string,
-    extra?: Partial<Pick<User, "name">>
-  ) => Promise<void>;
+  register: (payload: {
+    email: string;
+    password: string;
+    name?: string;
+  }) => Promise<void>;
   logout: () => void;
-  isHR: boolean;
 };
 
 const Ctx = createContext<AuthCtx | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setTokenState] = useState<string | null>(getToken());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // attach/detach Authorization header on axios
-  const applyAxiosAuth = (t: string | null) => {
-    if (t) api.defaults.headers.common["Authorization"] = `Bearer ${t}`;
-    else delete api.defaults.headers.common["Authorization"];
-  };
-
-  useEffect(() => {
-    const t = localStorage.getItem("token");
-    const u = localStorage.getItem("user");
-    if (t && u) {
-      setToken(t);
-      setUser(JSON.parse(u) as User);
-      applyAxiosAuth(t);
+  async function login(email: string, password: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      // NOTE: no '/api' prefix here; the helper adds it
+      const res = await api.post<{ token: string; user: User }>("/auth/login", {
+        email,
+        password,
+      });
+      saveToken(res.data.token);
+      setTokenState(res.data.token);
+      setUser(res.data.user);
+    } catch (e: any) {
+      setError(e?.response?.data?.error || "Login failed");
+      throw e;
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }
 
-  const persistAuth = (t: string, u: User) => {
-    localStorage.setItem("token", t);
-    localStorage.setItem("user", JSON.stringify(u));
-    // convenience keys for places that expect role-specific tokens
-    if (u.role === "CANDIDATE") localStorage.setItem("cand_token", t);
-    if (u.role === "HR") localStorage.setItem("hr_token", t);
+  async function register(payload: {
+    email: string;
+    password: string;
+    name?: string;
+  }) {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.post<{ token: string; user: User }>(
+        "/auth/register",
+        payload
+      );
+      saveToken(res.data.token);
+      setTokenState(res.data.token);
+      setUser(res.data.user);
+    } catch (e: any) {
+      setError(e?.response?.data?.error || "Registration failed");
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }
 
-    setToken(t);
-    setUser(u);
-    applyAxiosAuth(t);
-  };
-
-  const login = async (email: string, password: string) => {
-    const { data } = await api.post("/api/auth/login", { email, password });
-    // backend returns { token, user: { id, role, email, name? } }
-    persistAuth(data.token, data.user as User);
-  };
-
-  // extra can include name (or later firstName/lastName if you expose them in UI)
-  const register = async (
-    email: string,
-    password: string,
-    extra?: Partial<Pick<User, "name">>
-  ) => {
-    const { data } = await api.post("/api/auth/register", {
-      email,
-      password,
-      ...extra,
-    });
-    persistAuth(data.token, data.user as User);
-  };
-
-  const logout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem("cand_token");
-    localStorage.removeItem("hr_token");
+  function logout() {
+    clearToken();
+    setTokenState(null);
     setUser(null);
-    setToken(null);
-    applyAxiosAuth(null);
-  };
-
-  const isHR = user?.role === "HR";
+  }
 
   return (
-    <Ctx.Provider value={{ user, token, login, register, logout, isHR }}>
+    <Ctx.Provider
+      value={{ user, token, loading, error, login, register, logout }}
+    >
       {children}
     </Ctx.Provider>
   );
 }
 
-export function useAuth(): AuthCtx {
+export function useAuth() {
   const ctx = useContext(Ctx);
-  if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }

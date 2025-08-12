@@ -6,7 +6,7 @@ import Register from "./pages/Register";
 import ApplicationForm from "./pages/candidate/ApplicationForm";
 import ApplicationStatus from "./pages/ApplicationStatus";
 import WrittenTest from "./pages/WrittenTest";
-import VideoInterview from "./pages/admin/VideoInterview";
+import VideoInterview from "./pages/candidate/VideoInterview";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import CandidateDetail from "./pages/admin/CandidateDetail";
 import ManageRoles from "./pages/admin/ManageRoles";
@@ -49,6 +49,10 @@ export default function App() {
 
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route
+            path="/candidate/video/:interviewId"
+            element={<VideoInterview />}
+          />
 
           <Route
             path="/apply"

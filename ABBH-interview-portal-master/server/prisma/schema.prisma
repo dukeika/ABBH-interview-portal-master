@@ -94,18 +94,33 @@ model Question {
 }
 
 model Interview {
-  id            String        @id @default(cuid())
-  applicationId String
-  jobId         String
-  type          InterviewType
-  assignedAt    DateTime      @default(now())
-  submittedAt   DateTime?
-  durationMins  Int           @default(30)
+  id               String   @id @default(cuid())
+  applicationId    String
+  jobId            String
+  type             InterviewType
+  assignedAt       DateTime @default(now())
+  submittedAt      DateTime?
+  durationMins     Int
+  // NEW: store exactly which questions HR assigned for this interview (array of IDs)
+  assignedQuestionIds Json?
+  // ...
+  application      Application @relation(fields: [applicationId], references: [id])
+  job              Job         @relation(fields: [jobId], references: [id])
+  answers          Answer[]
+  videos           VideoResponse[]
+}
+model VideoResponse {
+  id          String   @id @default(cuid())
+  interviewId String
+  questionId  String?
+  filePath    String
+  durationSec Int?
+  createdAt   DateTime @default(now())
+  interview   Interview @relation(fields: [interviewId], references: [id])
+  question    Question? @relation(fields: [questionId], references: [id])
 
-  application   Application   @relation(fields: [applicationId], references: [id])
-  job           Job           @relation(fields: [jobId], references: [id])
-  answers       Answer[]
-  videos        VideoResponse[]
+  // NEW: one video per question per interview (re-uploads overwrite)
+  @@unique([interviewId, questionId])
 }
 
 model Answer {
@@ -120,14 +135,3 @@ model Answer {
   question     Question   @relation(fields: [questionId], references: [id])
 }
 
-model VideoResponse {
-  id           String     @id @default(cuid())
-  interviewId  String
-  questionId   String?
-  filePath     String
-  durationSec  Int?
-  createdAt    DateTime   @default(now())
-
-  interview    Interview  @relation(fields: [interviewId], references: [id])
-  question     Question?  @relation(fields: [questionId], references: [id])
-}

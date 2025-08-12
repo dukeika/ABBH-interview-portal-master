@@ -1,153 +1,96 @@
-const express = require("express");
-const prisma = require("../prisma");
-const auth = require("../middleware/auth");
-const { requireRole } = require("../middleware/roles");
-const { nextStage, prevStage } = require("../utils/stage"); // ← update import
+import express from "express";
+import prisma from "../db/prisma.js";
+import { requireHR } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// List applications
-router.get("/applications", auth(), requireRole("HR"), async (req, res) => {
-  const list = await prisma.application.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { candidate: true, jobRole: true },
-  });
-  res.json(list);
-});
+/**
+ * POST /api/admin/applications/:id/assign-video
+ * body: { questionIds?: string[], durationMins?: number }
+ * Creates Interview{ type: VIDEO } and stores assignedQuestionIds (optional).
+ */
+router.post("/applications/:id/assign-video", requireHR, async (req, res) => {
+  try {
+    const applicationId = req.params.id;
+    const { questionIds = [], durationMins = 15 } = req.body;
 
-// Application details
-router.get("/applications/:id", auth(), requireRole("HR"), async (req, res) => {
-  const id = Number(req.params.id);
-  const app = await prisma.application.findUnique({
-    where: { id },
-    include: {
-      candidate: true,
-      jobRole: true,
-      answers: { include: { question: true } },
-      videos: { include: { question: true } },
-      events: { orderBy: { createdAt: "desc" } },
-    },
-  });
-  if (!app) return res.status(404).json({ error: "Not found" });
-  res.json(app);
-});
-
-// Approve or reject current stage
-router.post(
-  "/applications/:id/decision",
-  auth(),
-  requireRole("HR"),
-  async (req, res) => {
-    const id = Number(req.params.id);
-    const { decision, note } = req.body || {}; // 'APPROVE' | 'REJECT'
-    const app = await prisma.application.findUnique({ where: { id } });
-    if (!app) return res.status(404).json({ error: "Not found" });
-
-    const stageStatus = decision === "APPROVE" ? "APPROVED" : "REJECTED";
-    const updated = await prisma.application.update({
-      where: { id },
-      data: { stageStatus },
+    const app = await prisma.application.findUnique({
+      where: { id: applicationId },
+      include: { job: true },
     });
-    await prisma.stageEvent.create({
-      data: {
-        applicationId: id,
-        stage: app.stage,
-        action: decision,
-        actorUserId: req.user.id,
-        note,
-      },
-    });
-    res.json(updated);
-  }
-);
+    if (!app) return res.status(404).json({ error: "Application not found" });
 
-// Move to next stage (resets status to PENDING)
-router.post(
-  "/applications/:id/advance",
-  auth(),
-  requireRole("HR"),
-  async (req, res) => {
-    const id = Number(req.params.id);
-    const app = await prisma.application.findUnique({ where: { id } });
-    if (!app) return res.status(404).json({ error: "Not found" });
-
-    const ns = nextStage(app.stage);
-    const updated = await prisma.application.update({
-      where: { id },
-      data: { stage: ns, stageStatus: "PENDING" },
-    });
-    await prisma.stageEvent.create({
-      data: {
-        applicationId: id,
-        stage: ns,
-        action: "MOVED",
-        actorUserId: req.user.id,
-        note: "Advanced to next stage",
-      },
-    });
-    res.json(updated);
-  }
-);
-
-// Move to previous stage (resets status to PENDING)
-router.post(
-  "/applications/:id/revert",
-  auth(),
-  requireRole("HR"),
-  async (req, res) => {
-    const id = Number(req.params.id);
-    const app = await prisma.application.findUnique({ where: { id } });
-    if (!app) return res.status(404).json({ error: "Not found" });
-
-    const ps = prevStage(app.stage);
-    if (ps === app.stage) {
-      return res.status(400).json({ error: "Already at earliest stage" });
+    // Validate questionIds belong to app.jobId and are VIDEO-stage
+    let validatedIds = [];
+    if (Array.isArray(questionIds) && questionIds.length) {
+      const qs = await prisma.question.findMany({
+        where: { id: { in: questionIds }, jobId: app.jobId, forStage: "VIDEO" },
+        select: { id: true },
+      });
+      const found = new Set(qs.map((q) => q.id));
+      validatedIds = questionIds.filter((id) => found.has(id));
+      if (validatedIds.length !== questionIds.length) {
+        return res.status(400).json({
+          error: "One or more questionIds are invalid for this job/stage",
+        });
+      }
     }
 
-    const data = { stage: ps, stageStatus: "PENDING" };
-
-    // Optional: clear final link if leaving FINAL to avoid confusing the candidate
-    if (app.stage === "FINAL" && ps !== "FINAL") data.finalInterviewLink = null;
-
-    const updated = await prisma.application.update({ where: { id }, data });
-
-    await prisma.stageEvent.create({
+    const created = await prisma.interview.create({
       data: {
-        applicationId: id,
-        stage: ps,
-        action: "MOVED_BACK",
-        actorUserId: req.user.id,
-        note: "Reverted to previous stage",
+        applicationId: app.id,
+        jobId: app.jobId,
+        type: "VIDEO",
+        assignedAt: new Date(),
+        durationMins: durationMins || 15,
+        assignedQuestionIds: validatedIds.length ? validatedIds : null,
       },
+      select: { id: true, type: true, applicationId: true },
     });
 
-    res.json(updated);
+    return res.json(created);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Failed to assign video interview" });
   }
-);
+});
 
-// Set final interview link
-router.post(
-  "/applications/:id/final-link",
-  auth(),
-  requireRole("HR"),
-  async (req, res) => {
-    const id = Number(req.params.id);
-    const { link } = req.body || {};
+/**
+ * PATCH /api/admin/applications/:id/stage
+ * body: { stage, finalCallUrl?, finalCallAt?, overallScore? }
+ */
+router.patch("/applications/:id/stage", requireHR, async (req, res) => {
+  try {
+    const applicationId = req.params.id;
+    const { stage, finalCallUrl, finalCallAt, overallScore } = req.body;
+
+    if (!stage) return res.status(400).json({ error: "stage is required" });
+
+    const data = { stage };
+    if (finalCallUrl !== undefined) data.finalCallUrl = finalCallUrl || null;
+    if (finalCallAt !== undefined)
+      data.finalCallAt = finalCallAt ? new Date(finalCallAt) : null;
+    if (overallScore !== undefined) data.overallScore = overallScore;
+
     const updated = await prisma.application.update({
-      where: { id },
-      data: { finalInterviewLink: link || null },
-    });
-    await prisma.stageEvent.create({
-      data: {
-        applicationId: id,
-        stage: "FINAL",
-        action: "UPDATED_LINK",
-        actorUserId: req.user.id,
-        note: link || "",
+      where: { id: applicationId },
+      data,
+      select: {
+        id: true,
+        stage: true,
+        finalCallUrl: true,
+        finalCallAt: true,
+        overallScore: true,
       },
     });
-    res.json(updated);
-  }
-);
 
-module.exports = router;
+    return res.json(updated);
+  } catch (e) {
+    console.error(e);
+    if (e.code === "P2025")
+      return res.status(404).json({ error: "Application not found" });
+    return res.status(500).json({ error: "Failed to update stage" });
+  }
+});
+
+export default router;

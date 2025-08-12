@@ -1,4 +1,3 @@
-// client/src/pages/admin/AdminDashboard.tsx
 import { useEffect, useMemo, useState } from "react";
 import {
   Box,
@@ -16,6 +15,7 @@ import {
   Button,
   CircularProgress,
   Divider,
+  Alert,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import WorkOutlineIcon from "@mui/icons-material/WorkOutline";
@@ -25,10 +25,22 @@ import PendingActionsIcon from "@mui/icons-material/PendingActions";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 
+/* ---------------- Types ---------------- */
+
+type Stage =
+  | "APPLIED"
+  | "SCREENING"
+  | "WRITTEN"
+  | "VIDEO"
+  | "FINAL_CALL"
+  | "INTERVIEW" // some UIs use this umbrella term
+  | "OFFER"
+  | "REJECTED";
+
 type Job = {
   id: string;
   title: string;
-  status: "DRAFT" | "PUBLISHED" | "CLOSED";
+  status?: "DRAFT" | "PUBLISHED" | "CLOSED"; // optional to match API
   department?: string | null;
   location?: string | null;
   createdAt?: string;
@@ -40,34 +52,59 @@ type Application = {
   candidateName: string;
   email: string;
   phone?: string | null;
-  stage: "APPLIED" | "SCREENING" | "INTERVIEW" | "OFFER" | "REJECTED";
+  stage: Stage;
   status: "ACTIVE" | "WITHDRAWN";
   overallScore?: number | null;
   createdAt: string;
   job: Job;
 };
 
-const STAGES: Application["stage"][] = [
+/* Filter dropdown options */
+const STAGES: Stage[] = [
   "APPLIED",
   "SCREENING",
+  "WRITTEN",
+  "VIDEO",
+  "FINAL_CALL",
   "INTERVIEW",
   "OFFER",
   "REJECTED",
 ];
 
-const stageColor: Record<
-  Application["stage"],
-  "default" | "primary" | "secondary" | "success" | "warning" | "error" | "info"
-> = {
-  APPLIED: "info",
-  SCREENING: "secondary",
-  INTERVIEW: "primary",
-  OFFER: "success",
-  REJECTED: "error",
-};
+/* Map any Stage to a Chip color */
+function stageChipColor(
+  s: Stage
+):
+  | "default"
+  | "primary"
+  | "secondary"
+  | "success"
+  | "warning"
+  | "error"
+  | "info" {
+  switch (s) {
+    case "APPLIED":
+      return "info";
+    case "SCREENING":
+      return "secondary";
+    case "WRITTEN":
+      return "primary";
+    case "VIDEO":
+      return "primary";
+    case "FINAL_CALL":
+      return "warning";
+    case "INTERVIEW":
+      return "primary";
+    case "OFFER":
+      return "success";
+    case "REJECTED":
+      return "error";
+    default:
+      return "default";
+  }
+}
 
-const jobs = await api("/api/jobs");
-const apps = await api("/api/applications");
+/* ---------------- Component ---------------- */
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -87,15 +124,22 @@ export default function AdminDashboard() {
       setLoading(true);
       setError(null);
 
-      const [jobsData, appsData] = await Promise.all([
-        api<Job[]>("/api/jobs"),
-        api<any>("/api/applications"), // may be array OR {items,total,take,skip}
+      const [jobsRes, appsRes] = await Promise.all([
+        api.get<Job[]>("/jobs"), // helper prefixes /api
+        api.get<Application[] | { items: Application[] }>("/applications"),
       ]);
 
-      setJobs(jobsData);
-      setApps(Array.isArray(appsData) ? appsData : appsData.items ?? []);
+      setJobs(jobsRes.data);
+      const appsData = Array.isArray(appsRes.data)
+        ? appsRes.data
+        : appsRes.data?.items ?? [];
+      setApps(appsData);
     } catch (e: any) {
-      setError(e?.message || "Failed to load dashboard data");
+      const msg =
+        e?.response?.data?.error ||
+        e?.message ||
+        "Failed to load dashboard data";
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -103,6 +147,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = useMemo(() => {
@@ -110,11 +155,11 @@ export default function AdminDashboard() {
     return apps.filter((a) => {
       const matchesQ =
         !needle ||
-        a.candidateName.toLowerCase().includes(needle) ||
-        a.email.toLowerCase().includes(needle) ||
+        a.candidateName?.toLowerCase().includes(needle) ||
+        a.email?.toLowerCase().includes(needle) ||
         (a.job?.title || "").toLowerCase().includes(needle);
 
-      const matchesStage = !stage || a.stage === stage;
+      const matchesStage = !stage || a.stage === (stage as Stage);
       const matchesJob = !jobId || a.job?.id === jobId;
       return matchesQ && matchesStage && matchesJob;
     });
@@ -135,7 +180,7 @@ export default function AdminDashboard() {
       (a) => new Date(a.createdAt).getTime() >= weekAgo
     ).length;
 
-    const recent = [...filtered]
+    const recent = [...apps]
       .sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -143,7 +188,7 @@ export default function AdminDashboard() {
       .slice(0, 12);
 
     return { totalJobs, publishedJobs, totalApps, byStage, last7, recent };
-  }, [jobs, apps, filtered]);
+  }, [jobs, apps]);
 
   return (
     <Stack spacing={3} sx={{ p: { xs: 2, md: 3 } }}>
@@ -207,10 +252,18 @@ export default function AdminDashboard() {
         <SummaryCard
           icon={<PendingActionsIcon />}
           title="Pipeline: Interviews"
-          value={stats.byStage["INTERVIEW"] ?? 0}
+          value={
+            (stats.byStage["WRITTEN"] ?? 0) +
+            (stats.byStage["VIDEO"] ?? 0) +
+            (stats.byStage["FINAL_CALL"] ?? 0) +
+            (stats.byStage["INTERVIEW"] ?? 0)
+          }
           subtitle="Scheduled / in progress"
         />
       </Box>
+
+      {/* Error banner (if any) */}
+      {error ? <Alert severity="error">{error}</Alert> : null}
 
       {/* Filters */}
       <Paper
@@ -295,8 +348,6 @@ export default function AdminDashboard() {
           >
             <CircularProgress />
           </Box>
-        ) : error ? (
-          <Box sx={{ p: 3, color: "error.main" }}>{error}</Box>
         ) : filtered.length === 0 ? (
           <Box sx={{ p: 3, color: "text.secondary" }}>
             No applications match your filters.
@@ -324,7 +375,7 @@ export default function AdminDashboard() {
                 <Chip
                   size="small"
                   label={a.stage}
-                  color={stageColor[a.stage]}
+                  color={stageChipColor(a.stage)}
                 />
               </Box>
               <Cell
