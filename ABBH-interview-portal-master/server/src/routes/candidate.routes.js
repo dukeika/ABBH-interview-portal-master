@@ -4,7 +4,11 @@ import { signToken, verifyPassword } from "../lib/auth.js";
 
 const r = Router();
 
-/** POST /candidate/auth/login { email, password } */
+/**
+ * POST /candidate/auth/login
+ * body: { email, password }
+ * returns: { token, user }
+ */
 r.post("/auth/login", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password)
@@ -35,19 +39,30 @@ r.post("/auth/login", async (req, res) => {
   });
 });
 
-/** GET /candidate/me/apps  (Bearer token) */
+/**
+ * GET /candidate/me/apps
+ * - Bearer token (candidate)
+ * - Returns array of candidate's apps with job + interviews
+ */
 r.get("/me/apps", async (req, res) => {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
   if (!token) return res.status(401).json({ error: "Missing token" });
 
+  let payload;
   try {
-    // verify inside route (to avoid adding a global middleware here)
-    const jwt = await import("jsonwebtoken");
-    const payload = jwt.default.verify(token, process.env.JWT_SECRET);
-    if (payload.role !== "CANDIDATE")
-      return res.status(403).json({ error: "Forbidden" });
+    payload = (await import("jsonwebtoken")).default.verify(
+      token,
+      process.env.JWT_SECRET
+    );
+  } catch {
+    return res.status(401).json({ error: "Invalid token" });
+  }
 
+  if (payload?.role !== "CANDIDATE")
+    return res.status(403).json({ error: "Forbidden" });
+
+  try {
     const apps = await prisma.application.findMany({
       where: { candidateId: payload.sub },
       include: {
@@ -57,8 +72,9 @@ r.get("/me/apps", async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
     res.json(apps);
-  } catch {
-    res.status(401).json({ error: "Invalid token" });
+  } catch (e) {
+    console.error("candidate/me/apps error:", e);
+    res.status(500).json({ error: "Failed to fetch applications" });
   }
 });
 

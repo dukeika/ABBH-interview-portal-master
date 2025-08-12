@@ -87,11 +87,11 @@ export default function Header() {
           <Box
             component="img"
             src={logo}
-            alt="ABHolistic Logo"
+            alt="Applied Behavioral Holistic Health"
             sx={{ height: 40, mr: 1 }}
           />
           <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: 0.2 }}>
-            {brand}
+            Applied Behavioral Holistic Health
           </Typography>
         </Box>
 

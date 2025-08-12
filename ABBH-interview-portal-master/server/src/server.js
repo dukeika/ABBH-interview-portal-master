@@ -40,6 +40,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/auth", authRoutes); // e.g., POST /auth/login
 app.use("/api/jobs", jobsRoutes); // e.g., GET /api/jobs
 app.use("/api/applications", appsRoutes);
+app.use("/admin/applications", appsRoutes);
 app.use("/candidate", candidateRoutes);
 app.use("/api/application-status", applicationStatusRoutes);
 

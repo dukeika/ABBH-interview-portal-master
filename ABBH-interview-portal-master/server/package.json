@@ -1,6 +1,7 @@
 {
-  "name": "interview-api",
+  "name": "applied-behavioral-holistic-health",
   "version": "1.0.0",
+  "description": "Applied Behavioral Holistic Health Recruitment & Candidate Management",
   "type": "module",
   "private": true,
   "main": "src/server.js",
