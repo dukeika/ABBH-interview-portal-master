@@ -68,19 +68,40 @@ router.get("/:id", requireAuth, async (req, res) => {
     const id = req.params.id;
     const app = await prisma.application.findUnique({
       where: { id },
-      include: {
-        job: true,
-        interviews: { select: { id: true, type: true, submittedAt: true } },
+      select: {
+        id: true,
+        candidateName: true,
+        email: true,
+        phone: true,
+        resumeUrl: true, // <-- make sure these are included
+        coverLetter: true, // <--
+        stage: true,
+        status: true,
+        overallScore: true,
+        createdAt: true,
+        job: { select: { id: true, title: true } },
+        interviews: {
+          orderBy: { assignedAt: "asc" },
+          include: {
+            answers: { include: { question: true } },
+            videos: true,
+          },
+        },
       },
     });
     if (!app) return res.status(404).json({ error: "Application not found" });
 
     if (req.user.role !== "HR") {
-      // Candidate: must own the application
-      if (!app.candidateId || app.candidateId !== req.user.id) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
+      if (!app || !app.id)
+        return res.status(404).json({ error: "Application not found" });
+      // Candidate can only access their own application
+      const owns = await prisma.application.findFirst({
+        where: { id, candidateId: req.user.id },
+        select: { id: true },
+      });
+      if (!owns) return res.status(403).json({ error: "Forbidden" });
     }
+
     res.json(app);
   } catch (e) {
     console.error(e);

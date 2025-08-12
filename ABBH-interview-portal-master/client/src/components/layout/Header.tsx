@@ -12,18 +12,18 @@ import {
   Tooltip,
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
-import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "../../context/AuthContext";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import { useTheme } from "@mui/material/styles";
-import logo from "../../assets/logo.png"; // adjust path as needed
+import { Link as RouterLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
+import logo from "../../assets/logo.png"; // adjust path if needed
 
 function ThemeToggle() {
   const theme = useTheme();
   return (
     <Tooltip title="Toggle theme">
-      <IconButton onClick={() => (window as any).toggleTheme()}>
+      <IconButton onClick={() => (window as any).toggleTheme?.()}>
         {theme.palette.mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />}
       </IconButton>
     </Tooltip>
@@ -42,20 +42,21 @@ export default function Header() {
 
   const brand = import.meta.env.VITE_APP_NAME || "Interview Portal";
 
+  // Correct routes to match App.tsx
   const publicLinks = [
-    { to: "/apply-now", label: "Apply" },
+    { to: "/apply", label: "Apply" },
     { to: "/login", label: "Login" },
     { to: "/register", label: "Register" },
   ];
 
   const candidateLinks = [
-    { to: "/apply-now", label: "Apply" },
+    { to: "/apply", label: "Apply" },
     { to: "/status", label: "My Status" },
   ];
 
   const hrLinks = [
     { to: "/admin", label: "Admin" },
-    { to: "/admin/roles", label: "Jobs & Questions" },
+    { to: "/admin/jobs", label: "Jobs & Questions" }, // <-- fixed
   ];
 
   const links = !user
@@ -74,7 +75,7 @@ export default function Header() {
       <Toolbar sx={{ gap: 1 }}>
         {/* Logo + Brand */}
         <Box
-          component={Link}
+          component={RouterLink}
           to="/"
           sx={{
             display: "flex",
@@ -82,23 +83,40 @@ export default function Header() {
             textDecoration: "none",
             color: "inherit",
             flexGrow: 1,
+            minWidth: 0,
           }}
         >
           <Box
             component="img"
             src={logo}
-            alt="Applied Behavioral Holistic Health"
-            sx={{ height: 40, mr: 1 }}
+            alt={brand}
+            sx={{ height: 40, mr: 1, flexShrink: 0 }}
           />
-          <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: 0.2 }}>
+          <Typography
+            variant="h6"
+            sx={{
+              fontWeight: 800,
+              letterSpacing: 0.2,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+            title={brand}
+          >
             Applied Behavioral Holistic Health
           </Typography>
         </Box>
 
         {/* Desktop Links */}
-        <Box sx={{ display: { xs: "none", sm: "flex" }, gap: 1 }}>
+        <Box
+          sx={{
+            display: { xs: "none", sm: "flex" },
+            gap: 1,
+            alignItems: "center",
+          }}
+        >
           {links.map((l) => (
-            <Button key={l.to} color="inherit" component={Link} to={l.to}>
+            <Button key={l.to} color="inherit" component={RouterLink} to={l.to}>
               {l.label}
             </Button>
           ))}
@@ -111,17 +129,21 @@ export default function Header() {
         </Box>
 
         {/* Mobile Menu */}
-        <Box sx={{ display: { xs: "flex", sm: "none" } }}>
+        <Box sx={{ display: { xs: "flex", sm: "none" }, alignItems: "center" }}>
           <ThemeToggle />
           <IconButton
             color="inherit"
             onClick={handleMenu}
             size="large"
             aria-label="menu"
+            aria-controls={open ? "main-menu" : undefined}
+            aria-haspopup="true"
+            aria-expanded={open ? "true" : undefined}
           >
             <MenuIcon />
           </IconButton>
           <Menu
+            id="main-menu"
             anchorEl={anchorEl}
             open={open}
             onClose={handleClose}
@@ -131,7 +153,7 @@ export default function Header() {
             {links.map((l) => (
               <MenuItem
                 key={l.to}
-                component={Link}
+                component={RouterLink}
                 to={l.to}
                 onClick={handleClose}
               >

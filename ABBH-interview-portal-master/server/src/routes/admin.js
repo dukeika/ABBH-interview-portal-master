@@ -36,6 +36,134 @@ router.post("/applications/:id/assign-video", requireHR, async (req, res) => {
       }
     }
 
+    // POST /api/admin/applications/:id/assign-written
+    router.post(
+      "/applications/:id/assign-written",
+      requireHR,
+      async (req, res) => {
+        try {
+          const applicationId = req.params.id;
+          const { questionIds = [], durationMins = 30 } = req.body;
+
+          const app = await prisma.application.findUnique({
+            where: { id: applicationId },
+            include: { job: true },
+          });
+          if (!app)
+            return res.status(404).json({ error: "Application not found" });
+
+          // Validate questionIds belong to the job and forStage = WRITTEN
+          let validatedIds = [];
+          if (Array.isArray(questionIds) && questionIds.length) {
+            const qs = await prisma.question.findMany({
+              where: {
+                id: { in: questionIds },
+                jobId: app.jobId,
+                forStage: "WRITTEN",
+              },
+              select: { id: true },
+            });
+            const found = new Set(qs.map((q) => q.id));
+            validatedIds = questionIds.filter((id) => found.has(id));
+            if (validatedIds.length !== questionIds.length) {
+              return res.status(400).json({
+                error: "One or more questionIds are invalid for this job/stage",
+              });
+            }
+          }
+
+          const created = await prisma.interview.create({
+            data: {
+              applicationId: app.id,
+              jobId: app.jobId,
+              type: "WRITTEN",
+              assignedAt: new Date(),
+              durationMins: durationMins || 30,
+              assignedQuestionIds: validatedIds.length ? validatedIds : null,
+            },
+            select: { id: true, type: true },
+          });
+
+          // Move stage to WRITTEN
+          await prisma.application.update({
+            where: { id: applicationId },
+            data: { stage: "WRITTEN" },
+          });
+
+          return res.json(created);
+        } catch (e) {
+          console.error(e);
+          return res
+            .status(500)
+            .json({ error: "Failed to assign written interview" });
+        }
+      }
+    );
+
+    // POST /api/admin/applications/:id/assign-written
+    router.post(
+      "/applications/:id/assign-written",
+      requireHR,
+      async (req, res) => {
+        try {
+          const applicationId = req.params.id;
+          const { questionIds = [], durationMins = 30 } = req.body;
+
+          const app = await prisma.application.findUnique({
+            where: { id: applicationId },
+            include: { job: true },
+          });
+          if (!app)
+            return res.status(404).json({ error: "Application not found" });
+
+          // Validate questionIds belong to the job and forStage = WRITTEN
+          let validatedIds = [];
+          if (Array.isArray(questionIds) && questionIds.length) {
+            const qs = await prisma.question.findMany({
+              where: {
+                id: { in: questionIds },
+                jobId: app.jobId,
+                forStage: "WRITTEN",
+              },
+              select: { id: true },
+            });
+            const found = new Set(qs.map((q) => q.id));
+            validatedIds = questionIds.filter((id) => found.has(id));
+            if (validatedIds.length !== questionIds.length) {
+              return res.status(400).json({
+                error: "One or more questionIds are invalid for this job/stage",
+              });
+            }
+          }
+
+          const created = await prisma.interview.create({
+            data: {
+              applicationId: app.id,
+              jobId: app.jobId,
+              type: "WRITTEN",
+              assignedAt: new Date(),
+              durationMins: durationMins || 30,
+              assignedQuestionIds: validatedIds.length ? validatedIds : null,
+            },
+            select: { id: true, type: true },
+          });
+
+          // Move stage to WRITTEN
+          await prisma.application.update({
+            where: { id: applicationId },
+            data: { stage: "WRITTEN" },
+          });
+
+          return res.json(created);
+        } catch (e) {
+          console.error(e);
+          return res
+            .status(500)
+            .json({ error: "Failed to assign written interview" });
+        }
+      }
+    );
+
     const created = await prisma.interview.create({
       data: {
         applicationId: app.id,

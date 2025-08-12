@@ -9,6 +9,9 @@ import interviewRoutes from "./routes/interviews.js";
 import applicationStatusRoutes from "./routes/applicationStatus.js";
 import jobsRoutes from "./routes/jobs.js";
 import authRoutes from "./routes/auth.js";
+import applyRoutes from "./routes/apply.js";
+import adminJobsRoutes from "./routes/adminJobs.js";
+import { UPLOAD_ROOT } from "./config/paths.js";
 
 // You already have /api/auth/* and /api/jobs/* and /api/applications/*
 
@@ -35,14 +38,12 @@ app.get("/api/health", (_req, res) => res.json("ok"));
 app.use("/api/admin", adminRoutes);
 app.use("/api/interviews", interviewRoutes);
 app.use("/api/auth", authRoutes);
-
 app.use("/api/application-status", applicationStatusRoutes);
 app.use("/api/applications", applicationsRoutes);
-
-// TEMP: sanity check that /api/jobs path works at all
-app.get("/api/jobs/_test", (_req, res) => res.json({ ok: true }));
-
 app.use("/api/jobs", jobsRoutes);
+app.use("/api/apply", applyRoutes);
+app.use("/api/admin", adminJobsRoutes); // jobs & questions management
+app.use("/uploads", express.static(UPLOAD_ROOT));
 
 // 404
 app.use((req, res) => res.status(404).json({ error: "Not Found" }));

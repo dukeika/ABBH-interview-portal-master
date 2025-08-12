@@ -221,6 +221,9 @@ export default function AdminDashboard() {
             View All Applications
           </Button>
         </Stack>
+        <Button variant="outlined" onClick={() => navigate("/admin/jobs")}>
+          Jobs & Questions
+        </Button>
       </Stack>
 
       {/* Summary cards */}

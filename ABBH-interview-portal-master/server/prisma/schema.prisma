@@ -110,18 +110,20 @@ model Interview {
   videos           VideoResponse[]
 }
 model VideoResponse {
-  id          String   @id @default(cuid())
-  interviewId String
-  questionId  String?
-  filePath    String
-  durationSec Int?
-  createdAt   DateTime @default(now())
+  id           String   @id @default(cuid())
+  interviewId  String
+  questionId   String?
+  filePath     String
+  durationSec  Int?
+  createdAt    DateTime @default(now())
+  attemptCount Int      @default(0)   // <-- must exist
+
   interview   Interview @relation(fields: [interviewId], references: [id])
   question    Question? @relation(fields: [questionId], references: [id])
 
-  // NEW: one video per question per interview (re-uploads overwrite)
-  @@unique([interviewId, questionId])
+  @@unique([interviewId, questionId]) // <-- must exist for upsert by pair
 }
+
 
 model Answer {
   id           String     @id @default(cuid())
