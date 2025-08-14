@@ -1,74 +1,90 @@
-import express from "express";
+// server/src/routes/auth.js
+import { Router } from "express";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import prisma from "../db/prisma.js";
+import { prisma } from "../db/prisma.js";
+import { requireAuth, signToken } from "../utils/auth.js";
 
-const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
-// Comma-separated admin emails → HR role on login
-const HR_EMAILS = (process.env.HR_EMAILS || "hr@example.com")
-  .split(",")
-  .map((s) => s.trim().toLowerCase())
-  .filter(Boolean);
+const router = Router();
 
-function roleForEmail(email) {
-  return HR_EMAILS.includes(email.toLowerCase()) ? "HR" : "CANDIDATE";
-}
-
-router.post("/register", async (req, res) => {
+/**
+ * POST /api/auth/login
+ * Body: { email, password }
+ * - HR (from .env): HR_EMAIL + HR_PASSWORD
+ * - Candidate (from DB): Candidate.email + passwordHash
+ *
+ * Returns: { token, user: { id, role: "HR"|"CANDIDATE", email, name? } }
+ */
+router.post("/login", async (req, res, next) => {
   try {
-    const { email, password, name } = req.body || {};
-    if (!email || !password)
-      return res.status(400).json({ error: "email and password are required" });
+    const rawEmail = (req.body?.email ?? "").toString();
+    const password = (req.body?.password ?? "").toString();
 
-    const existing = await prisma.candidate.findUnique({ where: { email } });
-    if (existing)
-      return res.status(400).json({ error: "Email already registered" });
+    const email = rawEmail.trim().toLowerCase();
+    if (!email || !password) {
+      return res
+        .status(400)
+        .json({ error: "Email and password are required." });
+    }
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    const candidate = await prisma.candidate.create({
-      data: { email, passwordHash, name: name ?? null },
-      select: { id: true, email: true, name: true },
+    // --- HR via environment ---
+    const HR_EMAIL = (process.env.HR_EMAIL || "").trim().toLowerCase();
+    const HR_PASSWORD = process.env.HR_PASSWORD ?? "";
+
+    if (HR_EMAIL && email === HR_EMAIL) {
+      // Plain-text compare with HR_PASSWORD
+      const ok = HR_PASSWORD && password === HR_PASSWORD;
+      if (!ok) {
+        return res.status(401).json({ error: "Invalid email or password." });
+      }
+      const user = {
+        id: "hr-static",
+        role: "HR",
+        email: HR_EMAIL,
+        name: "Administrator",
+      };
+      const token = signToken(user);
+      // Small diagnostic header to confirm HR path was used
+      res.setHeader("X-Auth-Mode", "HR");
+      return res.json({ token, user });
+    }
+
+    // --- Candidate from DB ---
+    const candidate = await prisma.candidate.findUnique({
+      where: { email },
+      select: { id: true, email: true, name: true, passwordHash: true },
     });
 
-    const role = roleForEmail(email);
-    const token = jwt.sign({ id: candidate.id, email, role }, JWT_SECRET, {
-      expiresIn: "7d",
-    });
-    res.json({
-      token,
-      user: { id: candidate.id, email, name: candidate.name, role },
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Registration failed" });
+    if (!candidate || !candidate.passwordHash) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    const ok = await bcrypt.compare(password, candidate.passwordHash);
+    if (!ok) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    const user = {
+      id: candidate.id,
+      role: "CANDIDATE",
+      email: candidate.email,
+      name: candidate.name || null,
+    };
+    const token = signToken(user);
+    res.setHeader("X-Auth-Mode", "CANDIDATE");
+    return res.json({ token, user });
+  } catch (err) {
+    next(err);
   }
 });
 
-router.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
-    if (!email || !password)
-      return res.status(400).json({ error: "email and password are required" });
+/** GET /api/auth/me — who am I (requires token) */
+router.get("/me", requireAuth(["HR", "CANDIDATE"]), (req, res) => {
+  res.json({ user: req.user });
+});
 
-    const cand = await prisma.candidate.findUnique({ where: { email } });
-    if (!cand) return res.status(401).json({ error: "Invalid credentials" });
-
-    const ok = await bcrypt.compare(password, cand.passwordHash);
-    if (!ok) return res.status(401).json({ error: "Invalid credentials" });
-
-    const role = roleForEmail(email);
-    const token = jwt.sign({ id: cand.id, email, role }, JWT_SECRET, {
-      expiresIn: "7d",
-    });
-    res.json({
-      token,
-      user: { id: cand.id, email: cand.email, name: cand.name, role },
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Login failed" });
-  }
+/** POST /api/auth/logout — stateless (client should clear token) */
+router.post("/logout", (_req, res) => {
+  res.json({ ok: true });
 });
 
 export default router;

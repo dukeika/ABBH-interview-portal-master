@@ -1,190 +1,204 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Box,
   Button,
   Card,
   CardContent,
-  CircularProgress,
+  CardHeader,
+  LinearProgress,
   Stack,
   Typography,
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
-import { api } from "../lib/api"; // <-- axios instance (adds Authorization)
-import dayjs from "../lib/dayjs"; // TZ already configured in your helper
-import { useAuth } from "../context/AuthContext";
+import { fetchLatestApplicationStatus, LatestStatus } from "../lib/api";
 
-type InterviewLite = {
-  id: string;
-  type: "VIDEO" | "WRITTEN";
-  submittedAt?: string | null;
-};
-type JobLite = { id: string; title: string | null };
-
-type ApplicationStatus = {
-  id: string;
-  stage:
-    | "APPLIED"
-    | "SCREENING"
-    | "WRITTEN"
-    | "VIDEO"
-    | "FINAL_CALL"
-    | "OFFER"
-    | "REJECTED";
-  status?: "ACTIVE" | "WITHDRAWN";
-  finalCallUrl?: string | null;
-  finalCallAt?: string | null;
-  createdAt: string;
-  job: JobLite;
-  interviews?: InterviewLite[];
-};
-
-export default function ApplicationStatusPage() {
-  const nav = useNavigate();
-  const { user, token } = useAuth();
+export default function ApplicationStatus() {
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
-  const [app, setApp] = useState<ApplicationStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [latest, setLatest] = useState<LatestStatus | null>(null);
+
+  const [testing, setTesting] = useState(false);
+  const [ready, setReady] = useState<boolean>(
+    () => localStorage.getItem("videoReady") === "1"
+  );
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
-    let mounted = true;
-
-    async function fetchStatus() {
+    (async () => {
       try {
-        setErr(null);
         setLoading(true);
-        // Use root path; api helper prefixes /api and injects Authorization
-        const res = await api.get<ApplicationStatus>("/application-status", {
-          params: { latest: true },
-        });
-        if (!mounted) return;
-        setApp(res.data);
+        const data = await fetchLatestApplicationStatus();
+        setLatest(data);
       } catch (e: any) {
-        const msg =
-          e?.response?.data?.error || e?.message || "Failed to load status";
-        if (!mounted) return;
-        setErr(msg);
+        const status = e?.response?.status;
+        if (status === 401) {
+          // api interceptor will redirect to /login — we just show a friendly note
+          setErr("Please log in to view your application status.");
+        } else {
+          setErr(
+            e?.response?.data?.error || e?.message || "Failed to load status."
+          );
+        }
       } finally {
-        if (mounted) setLoading(false);
+        setLoading(false);
       }
+    })();
+  }, []);
+
+  const stopTest = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setTesting(false);
+  };
 
-    // If not logged in yet, bounce to login
-    if (!token) {
-      nav("/login");
-      return;
+  const startTest = async () => {
+    try {
+      stopTest();
+      setTesting(true);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
+        await videoRef.current.play().catch(() => {});
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Unable to access camera/microphone.");
+      setTesting(false);
     }
-    fetchStatus();
+  };
 
-    return () => {
-      mounted = false;
-    };
-  }, [token, nav]);
+  const markReady = () => {
+    localStorage.setItem("videoReady", "1");
+    setReady(true);
+    stopTest();
+  };
 
-  // Helper: first pending VIDEO interview
-  const pendingVideo = app?.interviews?.find(
-    (i) => i.type === "VIDEO" && !i.submittedAt
-  );
+  useEffect(() => () => stopTest(), []);
 
-  if (loading) {
-    return (
-      <Box p={4} display="flex" justifyContent="center">
-        <CircularProgress />
-      </Box>
-    );
-  }
+  const goToStage = () => {
+    if (!latest?.id) return;
+    if (latest.stage === "WRITTEN") navigate(`/written/${latest.id}`);
+    else if (latest.stage === "VIDEO")
+      navigate(`/video-interview/${latest.id}`);
+  };
 
   return (
-    <Box p={2} maxWidth={900} mx="auto">
+    <Box p={2}>
       <Typography variant="h5" fontWeight={800} gutterBottom>
         Application Status
       </Typography>
 
-      {err ? (
+      {loading && <LinearProgress sx={{ mb: 2 }} />}
+      {err && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {err}
         </Alert>
-      ) : null}
+      )}
 
-      {!app ? (
-        <Alert severity="info">No application found yet.</Alert>
-      ) : (
-        <Card>
-          <CardContent>
-            <Stack spacing={1.25}>
-              <Typography variant="subtitle1" fontWeight={700}>
-                {app.job?.title || "Your Application"}
-              </Typography>
+      {!loading && latest && (
+        <Stack spacing={2}>
+          <Card variant="outlined">
+            <CardHeader
+              title={latest.jobTitle || "Your Application"}
+              subheader={
+                <Typography variant="body2">
+                  Current Stage: <b>{latest.stage || "—"}</b>
+                </Typography>
+              }
+            />
+            <CardContent>
+              {!latest.stage && (
+                <Typography variant="body2">
+                  You don’t have an active stage yet. Please check back later.
+                </Typography>
+              )}
 
-              <Typography variant="body2" color="text.secondary">
-                Submitted: {dayjs(app.createdAt).format("LLL")}
-              </Typography>
+              {latest.stage === "WRITTEN" && (
+                <Stack direction="row" spacing={2}>
+                  <Button variant="contained" onClick={goToStage}>
+                    Start Written Test
+                  </Button>
+                </Stack>
+              )}
 
-              <Stack direction="row" spacing={1} flexWrap="wrap">
-                <StatusPill label={`Stage: ${app.stage}`} />
-                {app.status ? (
-                  <StatusPill label={`Status: ${app.status}`} />
-                ) : null}
-              </Stack>
+              {latest.stage === "VIDEO" && (
+                <Stack spacing={2}>
+                  <Card variant="outlined">
+                    <CardHeader title="Test your camera & microphone" />
+                    <CardContent>
+                      <Stack spacing={1}>
+                        <video
+                          ref={videoRef}
+                          style={{
+                            width: 320,
+                            height: 180,
+                            background: "#000",
+                            borderRadius: 8,
+                          }}
+                          playsInline
+                          muted
+                        />
+                        <Stack direction="row" spacing={1}>
+                          {!testing ? (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={startTest}
+                            >
+                              Start Test
+                            </Button>
+                          ) : (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={stopTest}
+                            >
+                              Stop Test
+                            </Button>
+                          )}
+                          <Button
+                            size="small"
+                            variant="contained"
+                            onClick={markReady}
+                            disabled={!testing}
+                          >
+                            I can see/hear myself
+                          </Button>
+                        </Stack>
+                        {ready && (
+                          <Alert severity="success">
+                            Devices ready. You can start the interview.
+                          </Alert>
+                        )}
+                      </Stack>
+                    </CardContent>
+                  </Card>
 
-              {/* VIDEO interview action */}
-              {pendingVideo ? (
-                <Box>
-                  <Typography variant="body2" sx={{ mb: 1 }}>
-                    A video interview has been assigned to you.
-                  </Typography>
                   <Button
                     variant="contained"
-                    onClick={() => nav(`/candidate/video/${pendingVideo.id}`)}
+                    onClick={goToStage}
+                    disabled={!ready}
+                    title={!ready ? "Please test your devices first" : ""}
                   >
                     Start Video Interview
                   </Button>
-                </Box>
-              ) : null}
-
-              {/* Final Call action */}
-              {app.stage === "FINAL_CALL" && app.finalCallUrl ? (
-                <Box>
-                  <Typography variant="body2" sx={{ mb: 1 }}>
-                    Final Call scheduled:{" "}
-                    {app.finalCallAt
-                      ? dayjs(app.finalCallAt).format("LLL")
-                      : "Time not set"}
-                  </Typography>
-                  <Button
-                    variant="contained"
-                    color="success"
-                    href={app.finalCallUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Join Final Call
-                  </Button>
-                </Box>
-              ) : null}
-            </Stack>
-          </CardContent>
-        </Card>
+                </Stack>
+              )}
+            </CardContent>
+          </Card>
+        </Stack>
       )}
-    </Box>
-  );
-}
-
-function StatusPill({ label }: { label: string }) {
-  return (
-    <Box
-      sx={{
-        px: 1,
-        py: 0.25,
-        borderRadius: 2,
-        bgcolor: "action.hover",
-        fontSize: 12,
-        fontWeight: 700,
-        display: "inline-block",
-      }}
-    >
-      {label}
     </Box>
   );
 }

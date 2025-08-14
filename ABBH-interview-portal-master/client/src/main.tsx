@@ -1,21 +1,25 @@
-// src/main.tsx
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { ThemeProvider, CssBaseline } from "@mui/material";
-import AppThemeProvider from "../src/providers/ThemeProvider";
-import App from "./App";
 import { AuthProvider } from "./context/AuthContext";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+// Use your theme provider if present; otherwise no-op wrapper
+import * as ThemeModule from "./providers/ThemeProvider";
+const AppThemeProvider: React.ComponentType<any> =
+  (ThemeModule as any).AppThemeProvider ||
+  (ThemeModule as any).default ||
+  (({ children }: { children: React.ReactNode }) => <>{children}</>);
+
+import App from "./App"; // <-- default export provided below
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <AppThemeProvider>
-      <CssBaseline />
+    <BrowserRouter>
       <AuthProvider>
-        <BrowserRouter>
+        <AppThemeProvider>
           <App />
-        </BrowserRouter>
+        </AppThemeProvider>
       </AuthProvider>
-    </AppThemeProvider>
+    </BrowserRouter>
   </React.StrictMode>
 );

@@ -1,13 +1,18 @@
+// -----------------------------
+// Prisma Client & Datasource
+// -----------------------------
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"              // dev: simple & local
-  url      = env("DATABASE_URL")   // e.g. file:./prisma/dev.db
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
-// ---- Enums ----
+// -----------------------------
+// Enums
+// -----------------------------
 enum Stage {
   APPLIED
   SCREENING
@@ -27,7 +32,10 @@ enum InterviewType {
   VIDEO
 }
 
-// ---- Models ----
+// -----------------------------
+// Models
+// -----------------------------
+
 model Job {
   id           String        @id @default(cuid())
   title        String
@@ -46,7 +54,6 @@ model Job {
 model Candidate {
   id           String        @id @default(cuid())
   email        String        @unique
-  // keep both name and first/last optional so older UI still works
   name         String?
   firstName    String?
   lastName     String?
@@ -57,73 +64,95 @@ model Candidate {
 }
 
 model Application {
-  id             String     @id @default(cuid())
+  id             String        @id @default(cuid())
   jobId          String
   candidateId    String?
-  // optional meta used by UI / forms
+
   candidateName  String?
   email          String?
   phone          String?
   resumeUrl      String?
   coverLetter    String?
 
-  stage          Stage      @default(APPLIED)
-  status         String     @default("ACTIVE")
+  stage          Stage         @default(APPLIED)
+  status         String        @default("ACTIVE")
   overallScore   Float?
   finalCallUrl   String?
   finalCallAt    DateTime?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
-  job            Job        @relation(fields: [jobId], references: [id])
-  candidate      Candidate? @relation(fields: [candidateId], references: [id])
+  job            Job           @relation(fields: [jobId], references: [id])
+  candidate      Candidate?    @relation(fields: [candidateId], references: [id])
   interviews     Interview[]
+  videos         VideoResponse[]
 }
 
 model Question {
-  id             String       @id @default(cuid())
+  id             String        @id @default(cuid())
   jobId          String
-  text           String
-  type           QuestionType @default(OPEN)
-  forStage       Stage        @default(WRITTEN)
-  createdAt      DateTime     @default(now())
 
-  job            Job          @relation(fields: [jobId], references: [id])
+  // FINAL: now required
+  prompt         String
+  text           String?
+
+  type           QuestionType  @default(OPEN)
+  forStage       Stage         @default(WRITTEN)
+
+  // FINAL: now required
+  order          Int
+
+  createdAt      DateTime      @default(now())
+
+  job            Job           @relation(fields: [jobId], references: [id])
   answers        Answer[]
   videoResponses VideoResponse[]
 }
 
 model Interview {
-  id               String   @id @default(cuid())
-  applicationId    String
-  jobId            String
-  type             InterviewType
-  assignedAt       DateTime @default(now())
-  submittedAt      DateTime?
-  durationMins     Int
-  // NEW: store exactly which questions HR assigned for this interview (array of IDs)
+  id                  String        @id @default(cuid())
+  applicationId       String
+  jobId               String
+  type                InterviewType
+  assignedAt          DateTime      @default(now())
+  submittedAt         DateTime?
+  durationMins        Int?
   assignedQuestionIds Json?
-  // ...
-  application      Application @relation(fields: [applicationId], references: [id])
-  job              Job         @relation(fields: [jobId], references: [id])
-  answers          Answer[]
-  videos           VideoResponse[]
+
+  application         Application   @relation(fields: [applicationId], references: [id])
+  job                 Job           @relation(fields: [jobId], references: [id])
+  answers             Answer[]
+  videos              VideoResponse[]
 }
+
 model VideoResponse {
-  id           String   @id @default(cuid())
-  interviewId  String
-  questionId   String?
-  filePath     String
-  durationSec  Int?
-  createdAt    DateTime @default(now())
-  attemptCount Int      @default(0)   // <-- must exist
+  id             String      @id @default(cuid())
 
-  interview   Interview @relation(fields: [interviewId], references: [id])
-  question    Question? @relation(fields: [questionId], references: [id])
+  // FINAL: now required
+  applicationId  String
 
-  @@unique([interviewId, questionId]) // <-- must exist for upsert by pair
+  mimeType       String      @default("video/webm")
+  durationMs     Int         @default(0)
+
+  questionId     String?
+  interviewId    String?
+
+  filePath       String
+  startedAt      DateTime?
+  endedAt        DateTime?
+  createdAt      DateTime     @default(now())
+  attemptCount   Int          @default(0)
+
+  application    Application  @relation(fields: [applicationId], references: [id])
+  question       Question?    @relation(fields: [questionId], references: [id])
+  interview      Interview?   @relation(fields: [interviewId], references: [id])
+
+  @@unique([applicationId, questionId])
+
+  @@index([applicationId])
+  @@index([questionId])
+  @@index([interviewId])
 }
-
 
 model Answer {
   id           String     @id @default(cuid())
@@ -135,5 +164,7 @@ model Answer {
 
   interview    Interview  @relation(fields: [interviewId], references: [id])
   question     Question   @relation(fields: [questionId], references: [id])
-}
 
+  @@index([interviewId])
+  @@index([questionId])
+}

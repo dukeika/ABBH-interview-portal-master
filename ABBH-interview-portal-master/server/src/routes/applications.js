@@ -1,111 +1,196 @@
-import express from "express";
-import prisma from "../db/prisma.js";
-import { requireHR, requireAuth } from "../middleware/auth.js";
+import { Router } from "express";
+import { prisma } from "../db/prisma.js";
+import { requireAuth } from "../utils/auth.js";
 
-const router = express.Router();
+const router = Router();
 
 /**
  * GET /api/applications
- * HR-only list with optional filters:
- *   ?q=<search>   (candidateName/email/job.title contains)
- *   ?stage=<Stage>
- *   ?jobId=<jobId>
+ * Admin list (optional filters)
  */
-router.get("/", requireHR, async (req, res) => {
+router.get("/", requireAuth(["HR"]), async (req, res, next) => {
   try {
-    const { q, stage, jobId } = req.query;
+    const { q, stage, job } = req.query;
 
-    const where = {
-      ...(stage ? { stage: String(stage) } : {}),
-      ...(jobId ? { jobId: String(jobId) } : {}),
-      ...(q
-        ? {
-            OR: [
-              { candidateName: { contains: String(q), mode: "insensitive" } },
-              { email: { contains: String(q), mode: "insensitive" } },
-              { job: { title: { contains: String(q), mode: "insensitive" } } },
-            ],
-          }
-        : {}),
-    };
+    const where = {};
+    if (stage) where.stage = stage;
+    if (job) where.jobId = job;
+    if (q) {
+      where.OR = [
+        { email: { contains: String(q), mode: "insensitive" } },
+        { candidateName: { contains: String(q), mode: "insensitive" } },
+        { candidate: { name: { contains: String(q), mode: "insensitive" } } },
+        { job: { title: { contains: String(q), mode: "insensitive" } } },
+      ];
+    }
 
-    const apps = await prisma.application.findMany({
+    const items = await prisma.application.findMany({
       where,
       orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        candidateName: true,
-        email: true,
-        phone: true,
-        stage: true, // e.g., APPLIED | SCREENING | WRITTEN | VIDEO | FINAL_CALL | OFFER | REJECTED
-        status: true, // ACTIVE | WITHDRAWN (if present in your schema)
-        overallScore: true,
-        createdAt: true,
-        job: {
-          select: {
-            id: true,
-            title: true,
-            // include only fields that exist in your Job model:
-            // location: true,
-          },
-        },
+      include: {
+        job: { select: { id: true, title: true } },
+        candidate: { select: { id: true, email: true, name: true } },
       },
     });
 
-    res.json(apps);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Failed to load applications" });
+    res.json(items);
+  } catch (err) {
+    next(err);
   }
 });
 
 /**
- * GET /api/applications/:id
- * HR can view any; Candidates can only view their own.
+ * GET /api/applications/:applicationId/video-questions
+ * Candidate/HR – return assigned VIDEO questions (fallback to job VIDEO questions)
  */
-router.get("/:id", requireAuth, async (req, res) => {
+router.get(
+  "/:applicationId/video-questions",
+  requireAuth(["CANDIDATE", "HR"]),
+  async (req, res, next) => {
+    try {
+      const { applicationId } = req.params;
+
+      const app = await prisma.application.findUnique({
+        where: { id: applicationId },
+        select: { id: true, jobId: true, candidateId: true },
+      });
+      if (!app) return res.status(404).json({ error: "Application not found" });
+      if (req.user?.role === "CANDIDATE" && req.user?.id !== app.candidateId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const interview = await prisma.interview.findFirst({
+        where: { applicationId, jobId: app.jobId, type: "VIDEO" },
+        select: { assignedQuestionIds: true },
+      });
+
+      let questions = [];
+      if (
+        Array.isArray(interview?.assignedQuestionIds) &&
+        interview.assignedQuestionIds.length
+      ) {
+        questions = await prisma.question.findMany({
+          where: { id: { in: interview.assignedQuestionIds } },
+        });
+        // keep original order from assignedQuestionIds
+        const orderMap = new Map(
+          interview.assignedQuestionIds.map((id, i) => [id, i])
+        );
+        questions.sort(
+          (a, b) => (orderMap.get(a.id) ?? 1e9) - (orderMap.get(b.id) ?? 1e9)
+        );
+      } else {
+        questions = await prisma.question.findMany({
+          where: { jobId: app.jobId, forStage: "VIDEO" },
+          orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+        });
+      }
+
+      res.json(
+        questions.map((q) => ({
+          id: q.id,
+          prompt: q.prompt || q.text,
+          order: q.order ?? 0,
+        }))
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * GET /api/applications/:applicationId/written-questions
+ * Candidate/HR – return assigned WRITTEN questions (fallback to job WRITTEN questions)
+ */
+router.get(
+  "/:applicationId/written-questions",
+  requireAuth(["CANDIDATE", "HR"]),
+  async (req, res, next) => {
+    try {
+      const { applicationId } = req.params;
+
+      const app = await prisma.application.findUnique({
+        where: { id: applicationId },
+        select: { id: true, jobId: true, candidateId: true },
+      });
+      if (!app) return res.status(404).json({ error: "Application not found" });
+      if (req.user?.role === "CANDIDATE" && req.user?.id !== app.candidateId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const interview = await prisma.interview.findFirst({
+        where: { applicationId, jobId: app.jobId, type: "WRITTEN" },
+        select: { assignedQuestionIds: true },
+      });
+
+      let questions = [];
+      if (
+        Array.isArray(interview?.assignedQuestionIds) &&
+        interview.assignedQuestionIds.length
+      ) {
+        questions = await prisma.question.findMany({
+          where: { id: { in: interview.assignedQuestionIds } },
+        });
+        const orderMap = new Map(
+          interview.assignedQuestionIds.map((id, i) => [id, i])
+        );
+        questions.sort(
+          (a, b) => (orderMap.get(a.id) ?? 1e9) - (orderMap.get(b.id) ?? 1e9)
+        );
+      } else {
+        questions = await prisma.question.findMany({
+          where: { jobId: app.jobId, forStage: "WRITTEN" },
+          orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+        });
+      }
+
+      res.json(
+        questions.map((q) => ({
+          id: q.id,
+          prompt: q.prompt || q.text,
+          order: q.order ?? 0,
+        }))
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * GET /api/applications/:id
+ * HR or owner can view a specific application
+ */
+router.get("/:id", requireAuth(["CANDIDATE", "HR"]), async (req, res, next) => {
   try {
-    const id = req.params.id;
+    const { id } = req.params;
+
     const app = await prisma.application.findUnique({
       where: { id },
-      select: {
-        id: true,
-        candidateName: true,
-        email: true,
-        phone: true,
-        resumeUrl: true, // <-- make sure these are included
-        coverLetter: true, // <--
-        stage: true,
-        status: true,
-        overallScore: true,
-        createdAt: true,
+      include: {
         job: { select: { id: true, title: true } },
-        interviews: {
-          orderBy: { assignedAt: "asc" },
-          include: {
-            answers: { include: { question: true } },
-            videos: true,
+        candidate: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            firstName: true,
+            lastName: true,
           },
         },
+        interviews: true,
       },
     });
     if (!app) return res.status(404).json({ error: "Application not found" });
 
-    if (req.user.role !== "HR") {
-      if (!app || !app.id)
-        return res.status(404).json({ error: "Application not found" });
-      // Candidate can only access their own application
-      const owns = await prisma.application.findFirst({
-        where: { id, candidateId: req.user.id },
-        select: { id: true },
-      });
-      if (!owns) return res.status(403).json({ error: "Forbidden" });
+    if (req.user?.role === "CANDIDATE" && req.user?.id !== app.candidateId) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     res.json(app);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Failed to load application" });
+  } catch (err) {
+    next(err);
   }
 });
 

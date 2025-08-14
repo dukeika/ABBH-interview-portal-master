@@ -1,91 +1,100 @@
-import React, { createContext, useContext, useState } from "react";
-import { api, setToken as saveToken, clearToken, getToken } from "../lib/api";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  api,
+  clearToken,
+  login as apiLogin,
+  LoginResponse,
+  setToken,
+} from "../lib/api";
+import { useNavigate, useLocation } from "react-router-dom";
 
-type Role = "CANDIDATE" | "HR";
-type User = { id: string; email: string; role: Role; name?: string | null };
+type Role = "HR" | "CANDIDATE";
+type User = { id: string; role: Role; email: string; name?: string | null };
 
 type AuthCtx = {
   user: User | null;
-  token: string | null;
   loading: boolean;
-  error: string | null;
   login: (email: string, password: string) => Promise<void>;
-  register: (payload: {
-    email: string;
-    password: string;
-    name?: string;
-  }) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState<User | null>(null);
-  const [token, setTokenState] = useState<string | null>(getToken());
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  async function login(email: string, password: string) {
-    setLoading(true);
-    setError(null);
-    try {
-      // NOTE: no '/api' prefix here; the helper adds it
-      const res = await api.post<{ token: string; user: User }>("/auth/login", {
-        email,
-        password,
-      });
-      saveToken(res.data.token);
-      setTokenState(res.data.token);
-      setUser(res.data.user);
-    } catch (e: any) {
-      setError(e?.response?.data?.error || "Login failed");
-      throw e;
-    } finally {
-      setLoading(false);
+  // bootstrap: get /auth/me if token present
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const { data } = await api.get<{ user: User }>("/auth/me");
+        if (!mounted) return;
+        setUser(data.user || null);
+      } catch {
+        // no valid token: leave user null
+        setUser(null);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const login = async (email: string, password: string) => {
+    const res: LoginResponse = await apiLogin(email, password);
+    // apiLogin already sets the token; ensure user state
+    setToken(res.token);
+    setUser(res.user as User);
+
+    // send to appropriate landing
+    if (res.user.role === "HR") {
+      navigate("/admin", { replace: true });
+    } else {
+      // CANDIDATE
+      // if they were trying to access something, return there
+      const from = (location.state as any)?.from as string | undefined;
+      if (from && !from.startsWith("/admin")) {
+        navigate(from, { replace: true });
+      } else {
+        navigate("/status", { replace: true });
+      }
     }
-  }
+  };
 
-  async function register(payload: {
-    email: string;
-    password: string;
-    name?: string;
-  }) {
-    setLoading(true);
-    setError(null);
+  const logout = async () => {
     try {
-      const res = await api.post<{ token: string; user: User }>(
-        "/auth/register",
-        payload
-      );
-      saveToken(res.data.token);
-      setTokenState(res.data.token);
-      setUser(res.data.user);
-    } catch (e: any) {
-      setError(e?.response?.data?.error || "Registration failed");
-      throw e;
-    } finally {
-      setLoading(false);
+      await api.post("/auth/logout");
+    } catch {
+      /* ignore */
     }
-  }
-
-  function logout() {
     clearToken();
-    setTokenState(null);
     setUser(null);
-  }
+    navigate("/login", { replace: true });
+  };
 
-  return (
-    <Ctx.Provider
-      value={{ user, token, loading, error, login, register, logout }}
-    >
-      {children}
-    </Ctx.Provider>
+  const value = useMemo<AuthCtx>(
+    () => ({ user, loading, login, logout }),
+    [user, loading]
   );
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useAuth() {
   const ctx = useContext(Ctx);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
+  if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
   return ctx;
 }

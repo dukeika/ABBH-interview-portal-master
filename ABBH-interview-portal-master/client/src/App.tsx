@@ -1,123 +1,117 @@
-// client/src/App.tsx
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { Container } from "@mui/material";
 
-import Header from "./components/layout/Header";
+// auth + guards
 import { useAuth } from "./context/AuthContext";
 
-/* Auth pages */
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-
-/* Candidate pages */
+// candidate pages
 import ApplicationStatus from "./pages/ApplicationStatus";
-import WrittenTest from "./pages/candidate/WrittenTest";
-import VideoInterview from "./pages/candidate/VideoInterview";
-import Apply from "./pages/Apply";
+import WrittenTest from "./pages/WrittenTest";
+import VideoInterview from "./pages/VideoInterview";
+import VideoSubmitted from "./pages/VideoSubmitted";
 
-/* Admin pages */
-import AdminDashboard from "./pages/admin/AdminDashboard";
-import ApplicationDetail from "./pages/admin/ApplicationDetail";
+// admin pages
 import JobsManager from "./pages/admin/JobsManager";
+import AdminApplicationDetail from "./pages/admin/AdminApplicationDetail";
+import AdminVideoReview from "./pages/admin/AdminVideoReview";
+import AdminWrittenReview from "./pages/admin/AdminWrittenReview";
 
-/* -------------------------------------------------- */
+// auth pages
+import Login from "./pages/Login";
 
-function HomeRedirect() {
-  const { user } = useAuth();
+function Protected({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div style={{ padding: 16 }}>Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  return <Navigate to={user.role === "HR" ? "/admin" : "/status"} replace />;
-}
-
-function Protected({
-  children,
-  roles,
-}: {
-  children: React.ReactNode;
-  roles?: Array<"CANDIDATE" | "HR">;
-}) {
-  const { user } = useAuth();
-  if (!user) return <Navigate to="/login" replace />;
-  if (roles && !roles.includes(user.role)) {
-    return <Navigate to={user.role === "HR" ? "/admin" : "/status"} replace />;
-  }
   return <>{children}</>;
 }
 
-/* -------------------------------------------------- */
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div style={{ padding: 16 }}>Loading…</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "HR") return <Navigate to="/status" replace />;
+  return <>{children}</>;
+}
 
 export default function App() {
   return (
-    <>
-      <Header />
-      <Container sx={{ py: 3 }}>
-        <Routes>
-          {/* Default landing sends users to their role home */}
-          <Route path="/" element={<HomeRedirect />} />
+    <Routes>
+      {/* Auth */}
+      <Route path="/login" element={<Login />} />
 
-          {/* Auth */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+      {/* Candidate */}
+      <Route path="/" element={<Navigate to="/status" replace />} />
+      <Route
+        path="/status"
+        element={
+          <Protected>
+            <ApplicationStatus />
+          </Protected>
+        }
+      />
+      <Route
+        path="/written/:applicationId"
+        element={
+          <Protected>
+            <WrittenTest />
+          </Protected>
+        }
+      />
+      <Route
+        path="/video-interview/:applicationId"
+        element={
+          <Protected>
+            <VideoInterview />
+          </Protected>
+        }
+      />
+      <Route
+        path="/video-submitted/:applicationId"
+        element={
+          <Protected>
+            <VideoSubmitted />
+          </Protected>
+        }
+      />
 
-          {/* Public application (resume + cover letter + password) */}
-          <Route path="/apply" element={<Apply />} />
+      {/* Admin */}
+      <Route path="/admin" element={<Navigate to="/admin/jobs" replace />} />
+      <Route
+        path="/admin/jobs"
+        element={
+          <AdminOnly>
+            <JobsManager />
+          </AdminOnly>
+        }
+      />
+      <Route
+        path="/admin/applications/:applicationId"
+        element={
+          <AdminOnly>
+            <AdminApplicationDetail />
+          </AdminOnly>
+        }
+      />
+      <Route
+        path="/admin/applications/:applicationId/videos"
+        element={
+          <AdminOnly>
+            <AdminVideoReview />
+          </AdminOnly>
+        }
+      />
+      <Route
+        path="/admin/applications/:applicationId/written"
+        element={
+          <AdminOnly>
+            <AdminWrittenReview />
+          </AdminOnly>
+        }
+      />
 
-          {/* Candidate area */}
-          <Route
-            path="/status"
-            element={
-              <Protected roles={["CANDIDATE"]}>
-                <ApplicationStatus />
-              </Protected>
-            }
-          />
-          <Route
-            path="/candidate/written/:interviewId"
-            element={
-              <Protected roles={["CANDIDATE"]}>
-                <WrittenTest />
-              </Protected>
-            }
-          />
-          <Route
-            path="/candidate/video/:interviewId"
-            element={
-              <Protected roles={["CANDIDATE"]}>
-                <VideoInterview />
-              </Protected>
-            }
-          />
-
-          {/* Admin area */}
-          <Route
-            path="/admin"
-            element={
-              <Protected roles={["HR"]}>
-                <AdminDashboard />
-              </Protected>
-            }
-          />
-          <Route
-            path="/admin/applications/:id"
-            element={
-              <Protected roles={["HR"]}>
-                <ApplicationDetail />
-              </Protected>
-            }
-          />
-          <Route
-            path="/admin/jobs"
-            element={
-              <Protected roles={["HR"]}>
-                <JobsManager />
-              </Protected>
-            }
-          />
-
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Container>
-    </>
+      {/* Fallback */}
+      <Route path="*" element={<div style={{ padding: 16 }}>Not Found</div>} />
+    </Routes>
   );
 }
