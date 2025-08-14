@@ -1,3 +1,4 @@
+// client/src/pages/admin/AdminWrittenReview.tsx
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -5,36 +6,33 @@ import {
   Card,
   CardContent,
   CardHeader,
-  Divider,
   LinearProgress,
   Stack,
   Typography,
 } from "@mui/material";
 import { useParams } from "react-router-dom";
-import { fetchAdminWrittenReview, AdminWrittenItem } from "../../lib/api";
+import { fetchAdminWrittenReview } from "../../lib/api";
 
 export default function AdminWrittenReview() {
   const { applicationId } = useParams<{ applicationId: string }>();
-  const [items, setItems] = useState<AdminWrittenItem[]>([]);
-  const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [data, setData] = useState<{
+    submittedAt: string | null;
+    items: {
+      question: { id: string; prompt: string; order: number };
+      answer: string;
+    }[];
+  } | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
         if (!applicationId) throw new Error("Missing applicationId");
-        setLoading(true);
-        setErr(null);
         const d = await fetchAdminWrittenReview(applicationId);
-        setItems(d.items || []);
-        setSubmittedAt(d.submittedAt);
+        setData(d);
       } catch (e: any) {
-        setErr(
-          e?.response?.data?.error ||
-            e?.message ||
-            "Failed to load written answers."
-        );
+        setErr(e?.response?.data?.error || e?.message || "Failed to load.");
       } finally {
         setLoading(false);
       }
@@ -43,35 +41,28 @@ export default function AdminWrittenReview() {
 
   return (
     <Box p={2}>
-      <Stack spacing={2}>
-        <Typography variant="h5" fontWeight={800}>
-          Written Responses
-        </Typography>
-        {submittedAt && (
-          <Alert severity="success">
-            Submitted at {new Date(submittedAt).toLocaleString()}
-          </Alert>
-        )}
-        {loading && <LinearProgress />}
-        {err && <Alert severity="error">{err}</Alert>}
+      <Typography variant="h5" fontWeight={800}>
+        Written Answers
+      </Typography>
 
-        {!loading && items.length === 0 && (
-          <Alert severity="info">
-            No written responses have been submitted yet.
-          </Alert>
-        )}
+      {loading && <LinearProgress sx={{ my: 2 }} />}
+      {err && (
+        <Alert severity="error" sx={{ my: 2 }}>
+          {err}
+        </Alert>
+      )}
 
-        {items.map((it, idx) => (
-          <Card key={it.question.id} variant="outlined">
+      {data && data.items.length === 0 && (
+        <Alert severity="info">No written answers submitted yet.</Alert>
+      )}
+
+      <Stack spacing={2} sx={{ mt: 2 }}>
+        {data?.items.map((it, i) => (
+          <Card key={i} variant="outlined">
             <CardHeader
-              title={
-                <Typography fontWeight={700}>
-                  Q{it.question.order}. {it.question.prompt}
-                </Typography>
-              }
-              subheader={`Question ${idx + 1}`}
+              title={`Q${it.question.order}`}
+              subheader={it.question.prompt}
             />
-            <Divider />
             <CardContent>
               <Typography whiteSpace="pre-wrap">{it.answer || "—"}</Typography>
             </CardContent>

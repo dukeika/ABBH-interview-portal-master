@@ -1,97 +1,66 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Box,
   Button,
   Card,
   CardContent,
-  CardHeader,
+  Chip,
   LinearProgress,
   Stack,
   Typography,
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
-import { fetchLatestApplicationStatus, LatestStatus } from "../lib/api";
+import { api } from "../lib/api";
+
+type StatusApp = {
+  id: string;
+  stage:
+    | "APPLIED"
+    | "SCREENING"
+    | "WRITTEN"
+    | "VIDEO"
+    | "FINAL_CALL"
+    | "OFFER"
+    | "REJECTED";
+  status: string;
+  job?: { id: string; title: string } | null;
+  finalCallUrl?: string | null;
+  finalCallAt?: string | null;
+  videoAssignedCount?: number;
+  videoResponseCount?: number;
+  hasVideoStarted?: boolean;
+  hasVideoCompleted?: boolean;
+  hasWrittenSubmitted?: boolean; // ✅ new
+};
 
 export default function ApplicationStatus() {
   const navigate = useNavigate();
-
+  const [app, setApp] = useState<StatusApp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [latest, setLatest] = useState<LatestStatus | null>(null);
-
-  const [testing, setTesting] = useState(false);
-  const [ready, setReady] = useState<boolean>(
-    () => localStorage.getItem("videoReady") === "1"
-  );
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        const data = await fetchLatestApplicationStatus();
-        setLatest(data);
+        const { data } = await api.get<{ application: StatusApp | null }>(
+          "/application-status",
+          {
+            params: { latest: true },
+          }
+        );
+        setApp(data.application);
+        setErr(null);
       } catch (e: any) {
-        const status = e?.response?.status;
-        if (status === 401) {
-          // api interceptor will redirect to /login — we just show a friendly note
-          setErr("Please log in to view your application status.");
-        } else {
-          setErr(
-            e?.response?.data?.error || e?.message || "Failed to load status."
-          );
-        }
+        setErr(
+          e?.response?.data?.error || e?.message || "Failed to load status."
+        );
       } finally {
         setLoading(false);
       }
     })();
   }, []);
-
-  const stopTest = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setTesting(false);
-  };
-
-  const startTest = async () => {
-    try {
-      stopTest();
-      setTesting(true);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.muted = true;
-        await videoRef.current.play().catch(() => {});
-      }
-    } catch (e: any) {
-      setErr(e?.message || "Unable to access camera/microphone.");
-      setTesting(false);
-    }
-  };
-
-  const markReady = () => {
-    localStorage.setItem("videoReady", "1");
-    setReady(true);
-    stopTest();
-  };
-
-  useEffect(() => () => stopTest(), []);
-
-  const goToStage = () => {
-    if (!latest?.id) return;
-    if (latest.stage === "WRITTEN") navigate(`/written/${latest.id}`);
-    else if (latest.stage === "VIDEO")
-      navigate(`/video-interview/${latest.id}`);
-  };
 
   return (
     <Box p={2}>
@@ -106,98 +75,105 @@ export default function ApplicationStatus() {
         </Alert>
       )}
 
-      {!loading && latest && (
-        <Stack spacing={2}>
-          <Card variant="outlined">
-            <CardHeader
-              title={latest.jobTitle || "Your Application"}
-              subheader={
-                <Typography variant="body2">
-                  Current Stage: <b>{latest.stage || "—"}</b>
-                </Typography>
-              }
-            />
-            <CardContent>
-              {!latest.stage && (
-                <Typography variant="body2">
-                  You don’t have an active stage yet. Please check back later.
-                </Typography>
-              )}
+      {!loading && !app && <Alert severity="info">No application found.</Alert>}
 
-              {latest.stage === "WRITTEN" && (
-                <Stack direction="row" spacing={2}>
-                  <Button variant="contained" onClick={goToStage}>
-                    Start Written Test
-                  </Button>
-                </Stack>
-              )}
+      {app && (
+        <Card variant="outlined">
+          <CardContent>
+            <Stack spacing={1} sx={{ mb: 2 }}>
+              <Typography>
+                <b>Job:</b> {app.job?.title || "—"}
+              </Typography>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography fontWeight={700}>Stage:</Typography>
+                <Chip size="small" label={app.stage} />
+              </Stack>
+            </Stack>
 
-              {latest.stage === "VIDEO" && (
-                <Stack spacing={2}>
-                  <Card variant="outlined">
-                    <CardHeader title="Test your camera & microphone" />
-                    <CardContent>
-                      <Stack spacing={1}>
-                        <video
-                          ref={videoRef}
-                          style={{
-                            width: 320,
-                            height: 180,
-                            background: "#000",
-                            borderRadius: 8,
-                          }}
-                          playsInline
-                          muted
-                        />
-                        <Stack direction="row" spacing={1}>
-                          {!testing ? (
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={startTest}
-                            >
-                              Start Test
-                            </Button>
-                          ) : (
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={stopTest}
-                            >
-                              Stop Test
-                            </Button>
-                          )}
-                          <Button
-                            size="small"
-                            variant="contained"
-                            onClick={markReady}
-                            disabled={!testing}
-                          >
-                            I can see/hear myself
-                          </Button>
-                        </Stack>
-                        {ready && (
-                          <Alert severity="success">
-                            Devices ready. You can start the interview.
-                          </Alert>
-                        )}
-                      </Stack>
-                    </CardContent>
-                  </Card>
+            {/* WRITTEN */}
+            {app.stage === "WRITTEN" &&
+              (app.hasWrittenSubmitted ? (
+                <Button variant="contained" disabled>
+                  Written Submitted
+                </Button>
+              ) : (
+                <Button
+                  variant="contained"
+                  onClick={() => navigate(`/written/${app.id}`)}
+                >
+                  Start Written Test
+                </Button>
+              ))}
 
+            {/* VIDEO */}
+            {app.stage === "VIDEO" && (
+              <>
+                {!app.hasVideoStarted && (
                   <Button
                     variant="contained"
-                    onClick={goToStage}
-                    disabled={!ready}
-                    title={!ready ? "Please test your devices first" : ""}
+                    onClick={() => navigate(`/video-setup/${app.id}`)}
                   >
                     Start Video Interview
                   </Button>
-                </Stack>
-              )}
-            </CardContent>
-          </Card>
-        </Stack>
+                )}
+                {app.hasVideoStarted && !app.hasVideoCompleted && (
+                  <Button
+                    variant="contained"
+                    onClick={() => navigate(`/video-interview/${app.id}`)}
+                  >
+                    Continue Video Interview
+                  </Button>
+                )}
+                {app.hasVideoCompleted && (
+                  <Button variant="contained" disabled>
+                    Video Submitted
+                  </Button>
+                )}
+              </>
+            )}
+
+            {/* FINAL CALL */}
+            {app.stage === "FINAL_CALL" && (
+              <Stack spacing={1}>
+                <Typography>
+                  You’ve been invited to a final video call. Details are below:
+                </Typography>
+
+                {/* Show as plain text with link, not a button */}
+                {app.finalCallUrl ? (
+                  <Typography>
+                    Final call link:{" "}
+                    <a href={app.finalCallUrl} target="_blank" rel="noreferrer">
+                      {app.finalCallUrl}
+                    </a>
+                  </Typography>
+                ) : (
+                  <Alert severity="info">
+                    HR will share the call link and details here.
+                  </Alert>
+                )}
+
+                {app.finalCallAt && (
+                  <Typography variant="body2" color="text.secondary">
+                    Scheduled for {new Date(app.finalCallAt).toLocaleString()}
+                  </Typography>
+                )}
+              </Stack>
+            )}
+
+            {app.stage === "OFFER" && (
+              <Alert severity="success">
+                Congratulations! You’ve reached the offer stage.
+              </Alert>
+            )}
+
+            {app.stage === "REJECTED" && (
+              <Alert severity="warning">
+                Thank you for your time. You were not selected.
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
       )}
     </Box>
   );

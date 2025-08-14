@@ -8,6 +8,7 @@ import React, {
 import {
   api,
   clearToken,
+  getToken,
   login as apiLogin,
   LoginResponse,
   setToken,
@@ -32,18 +33,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // bootstrap: get /auth/me if token present
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         setLoading(true);
+        const token = getToken();
+        if (!token) {
+          setUser(null);
+          return;
+        }
         const { data } = await api.get<{ user: User }>("/auth/me");
         if (!mounted) return;
         setUser(data.user || null);
       } catch {
-        // no valid token: leave user null
         setUser(null);
+        clearToken();
       } finally {
         if (mounted) setLoading(false);
       }
@@ -55,31 +60,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const res: LoginResponse = await apiLogin(email, password);
-    // apiLogin already sets the token; ensure user state
     setToken(res.token);
     setUser(res.user as User);
-
-    // send to appropriate landing
     if (res.user.role === "HR") {
-      navigate("/admin", { replace: true });
+      navigate("/admin/applications", { replace: true });
     } else {
-      // CANDIDATE
-      // if they were trying to access something, return there
       const from = (location.state as any)?.from as string | undefined;
-      if (from && !from.startsWith("/admin")) {
-        navigate(from, { replace: true });
-      } else {
-        navigate("/status", { replace: true });
-      }
+      if (from && !from.startsWith("/admin")) navigate(from, { replace: true });
+      else navigate("/status", { replace: true });
     }
   };
 
   const logout = async () => {
     try {
       await api.post("/auth/logout");
-    } catch {
-      /* ignore */
-    }
+    } catch {}
     clearToken();
     setUser(null);
     navigate("/login", { replace: true });
@@ -89,7 +84,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({ user, loading, login, logout }),
     [user, loading]
   );
-
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

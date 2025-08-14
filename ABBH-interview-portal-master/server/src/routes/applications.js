@@ -1,3 +1,4 @@
+// server/src/routes/applications.js
 import { Router } from "express";
 import { prisma } from "../db/prisma.js";
 import { requireAuth } from "../utils/auth.js";
@@ -6,102 +7,56 @@ const router = Router();
 
 /**
  * GET /api/applications
- * Admin list (optional filters)
+ * Admin list of applications with candidate + job summary
  */
-router.get("/", requireAuth(["HR"]), async (req, res, next) => {
+router.get("/", requireAuth(["HR"]), async (_req, res, next) => {
   try {
-    const { q, stage, job } = req.query;
-
-    const where = {};
-    if (stage) where.stage = stage;
-    if (job) where.jobId = job;
-    if (q) {
-      where.OR = [
-        { email: { contains: String(q), mode: "insensitive" } },
-        { candidateName: { contains: String(q), mode: "insensitive" } },
-        { candidate: { name: { contains: String(q), mode: "insensitive" } } },
-        { job: { title: { contains: String(q), mode: "insensitive" } } },
-      ];
-    }
-
-    const items = await prisma.application.findMany({
-      where,
+    const apps = await prisma.application.findMany({
       orderBy: { createdAt: "desc" },
-      include: {
+      select: {
+        id: true,
+        stage: true,
+        status: true,
+        createdAt: true,
         job: { select: { id: true, title: true } },
-        candidate: { select: { id: true, email: true, name: true } },
+        candidate: { select: { id: true, name: true, email: true } },
       },
     });
-
-    res.json(items);
+    res.json(apps);
   } catch (err) {
     next(err);
   }
 });
 
 /**
- * GET /api/applications/:applicationId/video-questions
- * Candidate/HR – return assigned VIDEO questions (fallback to job VIDEO questions)
+ * GET /api/applications/:id
+ * Admin: get one application
  */
-router.get(
-  "/:applicationId/video-questions",
-  requireAuth(["CANDIDATE", "HR"]),
-  async (req, res, next) => {
-    try {
-      const { applicationId } = req.params;
-
-      const app = await prisma.application.findUnique({
-        where: { id: applicationId },
-        select: { id: true, jobId: true, candidateId: true },
-      });
-      if (!app) return res.status(404).json({ error: "Application not found" });
-      if (req.user?.role === "CANDIDATE" && req.user?.id !== app.candidateId) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-
-      const interview = await prisma.interview.findFirst({
-        where: { applicationId, jobId: app.jobId, type: "VIDEO" },
-        select: { assignedQuestionIds: true },
-      });
-
-      let questions = [];
-      if (
-        Array.isArray(interview?.assignedQuestionIds) &&
-        interview.assignedQuestionIds.length
-      ) {
-        questions = await prisma.question.findMany({
-          where: { id: { in: interview.assignedQuestionIds } },
-        });
-        // keep original order from assignedQuestionIds
-        const orderMap = new Map(
-          interview.assignedQuestionIds.map((id, i) => [id, i])
-        );
-        questions.sort(
-          (a, b) => (orderMap.get(a.id) ?? 1e9) - (orderMap.get(b.id) ?? 1e9)
-        );
-      } else {
-        questions = await prisma.question.findMany({
-          where: { jobId: app.jobId, forStage: "VIDEO" },
-          orderBy: [{ order: "asc" }, { createdAt: "asc" }],
-        });
-      }
-
-      res.json(
-        questions.map((q) => ({
-          id: q.id,
-          prompt: q.prompt || q.text,
-          order: q.order ?? 0,
-        }))
-      );
-    } catch (err) {
-      next(err);
-    }
+router.get("/:id", requireAuth(["HR"]), async (req, res, next) => {
+  try {
+    const app = await prisma.application.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        stage: true,
+        status: true,
+        createdAt: true,
+        resumeUrl: true,
+        coverLetter: true,
+        job: { select: { id: true, title: true } },
+        candidate: { select: { id: true, name: true, email: true } },
+      },
+    });
+    if (!app) return res.status(404).json({ error: "Application not found" });
+    res.json(app);
+  } catch (err) {
+    next(err);
   }
-);
+});
 
 /**
  * GET /api/applications/:applicationId/written-questions
- * Candidate/HR – return assigned WRITTEN questions (fallback to job WRITTEN questions)
+ * Candidate (owner) or HR: list written questions for the application's job
  */
 router.get(
   "/:applicationId/written-questions",
@@ -109,49 +64,22 @@ router.get(
   async (req, res, next) => {
     try {
       const { applicationId } = req.params;
-
       const app = await prisma.application.findUnique({
         where: { id: applicationId },
         select: { id: true, jobId: true, candidateId: true },
       });
       if (!app) return res.status(404).json({ error: "Application not found" });
-      if (req.user?.role === "CANDIDATE" && req.user?.id !== app.candidateId) {
+      if (req.user.role === "CANDIDATE" && req.user.id !== app.candidateId) {
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      const interview = await prisma.interview.findFirst({
-        where: { applicationId, jobId: app.jobId, type: "WRITTEN" },
-        select: { assignedQuestionIds: true },
+      const questions = await prisma.question.findMany({
+        where: { jobId: app.jobId, forStage: "WRITTEN" },
+        orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+        select: { id: true, prompt: true, order: true },
       });
 
-      let questions = [];
-      if (
-        Array.isArray(interview?.assignedQuestionIds) &&
-        interview.assignedQuestionIds.length
-      ) {
-        questions = await prisma.question.findMany({
-          where: { id: { in: interview.assignedQuestionIds } },
-        });
-        const orderMap = new Map(
-          interview.assignedQuestionIds.map((id, i) => [id, i])
-        );
-        questions.sort(
-          (a, b) => (orderMap.get(a.id) ?? 1e9) - (orderMap.get(b.id) ?? 1e9)
-        );
-      } else {
-        questions = await prisma.question.findMany({
-          where: { jobId: app.jobId, forStage: "WRITTEN" },
-          orderBy: [{ order: "asc" }, { createdAt: "asc" }],
-        });
-      }
-
-      res.json(
-        questions.map((q) => ({
-          id: q.id,
-          prompt: q.prompt || q.text,
-          order: q.order ?? 0,
-        }))
-      );
+      res.json(questions);
     } catch (err) {
       next(err);
     }
@@ -159,39 +87,128 @@ router.get(
 );
 
 /**
- * GET /api/applications/:id
- * HR or owner can view a specific application
+ * (Optional) GET /api/applications/:applicationId/video-questions
+ * Candidate (owner) or HR: list video questions for the application's job
  */
-router.get("/:id", requireAuth(["CANDIDATE", "HR"]), async (req, res, next) => {
-  try {
-    const { id } = req.params;
+router.get(
+  "/:applicationId/video-questions",
+  requireAuth(["CANDIDATE", "HR"]),
+  async (req, res, next) => {
+    try {
+      const { applicationId } = req.params;
+      const app = await prisma.application.findUnique({
+        where: { id: applicationId },
+        select: { id: true, jobId: true, candidateId: true },
+      });
+      if (!app) return res.status(404).json({ error: "Application not found" });
+      if (req.user.role === "CANDIDATE" && req.user.id !== app.candidateId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
 
-    const app = await prisma.application.findUnique({
-      where: { id },
-      include: {
-        job: { select: { id: true, title: true } },
-        candidate: {
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        interviews: true,
-      },
-    });
-    if (!app) return res.status(404).json({ error: "Application not found" });
+      const questions = await prisma.question.findMany({
+        where: { jobId: app.jobId, forStage: "VIDEO" },
+        orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+        select: { id: true, prompt: true, order: true },
+      });
 
-    if (req.user?.role === "CANDIDATE" && req.user?.id !== app.candidateId) {
-      return res.status(403).json({ error: "Forbidden" });
+      res.json(questions);
+    } catch (err) {
+      next(err);
     }
-
-    res.json(app);
-  } catch (err) {
-    next(err);
   }
-});
+);
+
+/**
+ * POST /api/applications/:applicationId/written-answers
+ * Body: { answers: [{ questionId: string, answer: string }] }
+ * Creates or updates a WRITTEN Interview and stores per-question answers.
+ * Candidate (owner) or HR.
+ */
+router.post(
+  "/:applicationId/written-answers",
+  requireAuth(["CANDIDATE", "HR"]),
+  async (req, res, next) => {
+    try {
+      const { applicationId } = req.params;
+      const { answers } = req.body || {};
+      if (!Array.isArray(answers) || answers.length === 0) {
+        return res.status(400).json({ error: "No answers provided." });
+      }
+
+      const app = await prisma.application.findUnique({
+        where: { id: applicationId },
+        select: { id: true, jobId: true, candidateId: true },
+      });
+      if (!app) return res.status(404).json({ error: "Application not found" });
+      if (req.user.role === "CANDIDATE" && req.user.id !== app.candidateId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // Ensure the questions belong to this job and are for WRITTEN
+      const qids = answers.map((a) => a.questionId);
+      const validQs = await prisma.question.findMany({
+        where: { id: { in: qids }, jobId: app.jobId, forStage: "WRITTEN" },
+        select: { id: true },
+      });
+      const validSet = new Set(validQs.map((q) => q.id));
+      const filtered = answers.filter((a) => validSet.has(a.questionId));
+
+      if (filtered.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "No valid answers for this application." });
+      }
+
+      // Find or create a WRITTEN interview for this application
+      let interview = await prisma.interview.findFirst({
+        where: { applicationId, jobId: app.jobId, type: "WRITTEN" },
+        select: { id: true },
+      });
+      if (!interview) {
+        interview = await prisma.interview.create({
+          data: {
+            applicationId,
+            jobId: app.jobId,
+            type: "WRITTEN",
+            durationMins: 0,
+          },
+          select: { id: true },
+        });
+      }
+
+      // Upsert each answer (find existing pair, update or create)
+      for (const a of filtered) {
+        const existing = await prisma.answer.findFirst({
+          where: { interviewId: interview.id, questionId: a.questionId },
+          select: { id: true },
+        });
+        if (existing) {
+          await prisma.answer.update({
+            where: { id: existing.id },
+            data: { answer: a.answer ?? "" },
+          });
+        } else {
+          await prisma.answer.create({
+            data: {
+              interviewId: interview.id,
+              questionId: a.questionId,
+              answer: a.answer ?? "",
+            },
+          });
+        }
+      }
+
+      // Mark interview submittedAt for bookkeeping
+      await prisma.interview.update({
+        where: { id: interview.id },
+        data: { submittedAt: new Date() },
+      });
+
+      res.json({ ok: true, interviewId: interview.id });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 export default router;

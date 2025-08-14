@@ -131,8 +131,8 @@ model VideoResponse {
   // FINAL: now required
   applicationId  String
 
-  mimeType       String      @default("video/webm")
-  durationMs     Int         @default(0)
+  mimeType       String    
+  durationMs     Int         
 
   questionId     String?
   interviewId    String?
@@ -147,7 +147,7 @@ model VideoResponse {
   question       Question?    @relation(fields: [questionId], references: [id])
   interview      Interview?   @relation(fields: [interviewId], references: [id])
 
-  @@unique([applicationId, questionId])
+  @@unique([applicationId, questionId], name: "applicationId_questionId")
 
   @@index([applicationId])
   @@index([questionId])

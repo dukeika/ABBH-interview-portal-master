@@ -151,15 +151,23 @@ export type AdminVideoItem = {
   question: { id: string; prompt: string; order: number } | null;
   absoluteUrl: string;
 };
+// ---- Video list for admin review ----
+export type VideoListItem = {
+  id: string;
+  url: string;
+  mimeType: string;
+  durationMs: number;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  question: { id: string; prompt: string; order: number } | null;
+};
+
 export async function listVideosByApplication(applicationId: string) {
-  const { data } = await api.get<{
-    items: Omit<AdminVideoItem, "absoluteUrl">[];
-  }>(`/videos/by-application/${applicationId}`);
-  const items = Array.isArray(data?.items) ? data.items : [];
-  return items.map((v) => ({
-    ...v,
-    absoluteUrl: absoluteUrl(v.url),
-  })) as AdminVideoItem[];
+  const { data } = await api.get<{ items: VideoListItem[] }>(
+    `/videos/by-application/${applicationId}`
+  );
+  return data.items;
 }
 
 /** --- Applications --- */
